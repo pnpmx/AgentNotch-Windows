@@ -45,9 +45,9 @@ real machines. Please report what you find.
 
 ## Install
 
-Download the latest installer from
-[Releases](https://github.com/pnpmx/AgentNotch-Windows/releases) or from the
-artifacts of the most recent successful [CI run](https://github.com/pnpmx/AgentNotch-Windows/actions).
+Download `AgentNotch_<version>_x64-setup.exe` from the
+[latest release](https://github.com/pnpmx/AgentNotch-Windows/releases/latest)
+(an `.msi` is also provided for managed installs).
 Builds are **not code-signed**, so Windows SmartScreen will warn: choose
 *More info → Run anyway* only if you trust the build. Compare the file against
 `SHA256SUMS.txt` from the release with:
