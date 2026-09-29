@@ -1,4 +1,4 @@
-# AgentNotch for Windows
+# AgentNotch for Windows and Linux
 
 [![CI](https://github.com/pnpmx/AgentNotch-Windows/actions/workflows/ci.yml/badge.svg)](https://github.com/pnpmx/AgentNotch-Windows/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -71,10 +71,41 @@ The NSIS installer installs for the current user only and needs no admin rights.
 If pasting fails (for example into an app running as administrator), the text is
 kept on the clipboard and in the panel's **Copy** button.
 
+## Linux
+
+Download the `.AppImage` (any distribution) or the `.deb` (Debian/Ubuntu) from
+the [latest release](https://github.com/pnpmx/AgentNotch-Windows/releases/latest).
+
+```sh
+chmod +x AgentNotch_*.AppImage && ./AgentNotch_*.AppImage
+# or
+sudo apt install ./AgentNotch_*_amd64.deb
+```
+
+**Wayland** (default on current GNOME, KDE and others) restricts what apps
+may do, so AgentNotch adapts:
+
+- **Docking:** the widget runs through XWayland so it can place itself on a
+  screen edge. Set `AGENTNOTCH_NATIVE_WAYLAND=1` to opt out.
+- **Hold-to-talk:** registered through the desktop's *GlobalShortcuts* portal
+  (KDE Plasma 6, GNOME 48+, Hyprland). The first launch may show a system
+  dialog to confirm the keys. If your desktop has no such portal, bind the
+  command `agentnotch --toggle-dictation` to a key in your keyboard settings:
+  press once to start, again to stop.
+- **Pasting:** Wayland blocks synthetic typing, so install one helper:
+  [`ydotool`](https://github.com/ReimuNotMoe/ydotool) (any desktop; its
+  `ydotoold` service must be running) or `wtype` (Sway, Hyprland and other
+  wlroots desktops). Without one, the text is copied and you press Ctrl+V.
+- **Tray icon:** GNOME needs the *AppIndicator* extension to show it.
+
+On X11 everything works as on Windows (`xdotool` is used for pasting).
+
 ## Build from source
 
-Requires Rust 1.88+, Node.js 20+, and on Windows the MSVC build tools, CMake and
-the WebView2 runtime ([Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)).
+Requires Rust 1.88+, Node.js 20+, CMake, and the platform libraries from the
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) (MSVC build tools
+and WebView2 on Windows; WebKitGTK 4.1, libayatana-appindicator and ALSA headers
+on Linux).
 
 ```powershell
 git clone https://github.com/pnpmx/AgentNotch-Windows.git
@@ -85,8 +116,7 @@ npx tauri dev       # run
 npx tauri build     # installers in src-tauri/target/release/bundle
 ```
 
-The app also compiles on macOS and Linux for development, but window focus,
-edge snapping while dragging and pasting are Windows-specific.
+The app also compiles on macOS for development, without pasting.
 
 ## How it works
 

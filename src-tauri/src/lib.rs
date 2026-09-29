@@ -577,7 +577,7 @@ pub fn run() {
             }
             register_hotkey(&handle);
             #[cfg(target_os = "linux")]
-            linux::bind_portal_shortcut(&handle, |app, pressed| on_hotkey(app, pressed));
+            linux::bind_portal_shortcut(&handle, on_hotkey);
             start_usage_loop(&handle);
             Ok(())
         })
