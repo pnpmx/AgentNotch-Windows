@@ -1,6 +1,8 @@
 mod dictation;
 mod dock;
 mod i18n;
+#[cfg(target_os = "linux")]
+mod linux;
 mod paths;
 mod settings;
 mod usage;
@@ -19,12 +21,18 @@ use tauri::{
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
+use dictation::inject::PasteTarget;
 use dictation::{Command, Event as SpeechEvent, SpeechState};
 use dock::Rect;
 use settings::Settings;
 use usage::parser::UsageSnapshot;
 
 pub use usage::claude::{run_bridge, BRIDGE_FLAG};
+
+pub const TOGGLE_FLAG: &str = "--toggle-dictation";
+
+#[cfg(target_os = "linux")]
+pub use linux::prepare_environment;
 
 const MAIN: &str = "main";
 const TRAY: &str = "tray";
@@ -249,18 +257,21 @@ fn start_usage_loop(app: &AppHandle) {
 
 // ---------- Dictation ----------
 
-fn own_window_is_foreground(app: &AppHandle, target: Option<dictation::inject::Target>) -> bool {
+/// True when the widget itself has keyboard focus: dictation must then never
+/// paste into it.
+fn widget_has_focus(app: &AppHandle, target: PasteTarget) -> bool {
+    let Some(window) = main_window(app) else {
+        return false;
+    };
     #[cfg(windows)]
-    {
-        if let (Some(window), Some(target)) = (main_window(app), target) {
-            return window
-                .hwnd()
-                .map(|h| h.0 as isize == target.0)
-                .unwrap_or(false);
-        }
+    if let PasteTarget::Window(target) = target {
+        return window
+            .hwnd()
+            .map(|h| h.0 as isize == target.0)
+            .unwrap_or(false);
     }
-    let _ = (app, target);
-    false
+    let _ = target;
+    window.is_focused().unwrap_or(false)
 }
 
 fn on_hotkey(app: &AppHandle, pressed: bool) {
@@ -268,11 +279,11 @@ fn on_hotkey(app: &AppHandle, pressed: bool) {
     let settings = state.settings();
     if pressed {
         if state.holding.swap(true, Ordering::SeqCst) {
-            return; // Key repeat.
+            return; // Key repeat, or the same press seen by two shortcut backends.
         }
-        let mut target = dictation::inject::foreground();
-        if own_window_is_foreground(app, target) {
-            target = None; // Never paste into the widget itself.
+        let mut target = dictation::inject::capture_target();
+        if widget_has_focus(app, target) {
+            target = PasteTarget::CopyOnly;
         }
         state.send(Command::Start {
             target,
@@ -284,6 +295,14 @@ fn on_hotkey(app: &AppHandle, pressed: bool) {
             model: settings.model,
         });
     }
+}
+
+/// `agentnotch --toggle-dictation`: start on the first call, stop on the next.
+/// For desktops where a hold-to-talk shortcut is unavailable, bind this command
+/// to any key in the system keyboard settings.
+fn toggle_dictation(app: &AppHandle) {
+    let holding = app.state::<AppState>().holding.load(Ordering::SeqCst);
+    on_hotkey(app, !holding);
 }
 
 fn register_hotkey(app: &AppHandle) {
@@ -489,13 +508,17 @@ fn make_non_activating(window: &WebviewWindow) {
 }
 
 #[cfg(not(windows))]
-fn make_non_activating(_window: &WebviewWindow) {}
+fn make_non_activating(window: &WebviewWindow) {
+    let _ = window.set_focusable(false);
+}
 
 pub fn run() {
     let settings = Settings::load();
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = main_window(app) {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if args.iter().any(|a| a == TOGGLE_FLAG) {
+                toggle_dictation(app);
+            } else if let Some(window) = main_window(app) {
                 let _ = window.show();
             }
         }))
@@ -553,6 +576,8 @@ pub fn run() {
                 let _ = window.show();
             }
             register_hotkey(&handle);
+            #[cfg(target_os = "linux")]
+            linux::bind_portal_shortcut(&handle, |app, pressed| on_hotkey(app, pressed));
             start_usage_loop(&handle);
             Ok(())
         })

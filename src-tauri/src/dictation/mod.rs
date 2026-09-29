@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use audio::Recorder;
-use inject::{PasteResult, Target};
+use inject::{PasteResult, PasteTarget};
 use transcribe::Transcriber;
 
 /// Presses shorter than this are treated as accidental taps.
@@ -22,7 +22,7 @@ const MIN_AUDIO_SECONDS: f64 = 0.3;
 
 pub enum Command {
     Start {
-        target: Option<Target>,
+        target: PasteTarget,
         model: String,
     },
     Stop {
@@ -87,7 +87,7 @@ fn start_download(name: String, tx: Sender<Command>, emit: Emit) {
 
 #[derive(Default)]
 struct Worker {
-    recorder: Option<(Recorder, Instant, Option<Target>)>,
+    recorder: Option<(Recorder, Instant, PasteTarget)>,
     transcriber: Transcriber,
     downloading: bool,
 }

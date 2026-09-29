@@ -2,6 +2,7 @@
 //! pressed, via the clipboard and a synthetic Ctrl+V. The previous clipboard
 //! text or image is restored afterwards unless something else copied in between.
 
+use std::sync::Mutex;
 use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -15,6 +16,18 @@ pub enum PasteResult {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Target(pub isize);
 
+/// Where dictated text may be pasted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PasteTarget {
+    /// A known window; paste only if it is still focused (Windows).
+    Window(Target),
+    /// The focused window cannot be identified (Wayland), so paste into
+    /// whatever has focus when transcription finishes.
+    Unverified,
+    /// Never paste, e.g. the widget itself had focus. Copy instead.
+    CopyOnly,
+}
+
 #[cfg(windows)]
 pub fn foreground() -> Option<Target> {
     use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
@@ -27,6 +40,27 @@ pub fn foreground() -> Option<Target> {
     None
 }
 
+/// The paste target to record when the shortcut is pressed.
+pub fn capture_target() -> PasteTarget {
+    match foreground() {
+        Some(target) => PasteTarget::Window(target),
+        None if cfg!(target_os = "linux") => PasteTarget::Unverified,
+        None => PasteTarget::CopyOnly,
+    }
+}
+
+/// On Linux the clipboard is served by its owner process, so contents vanish
+/// when the owning `Clipboard` is dropped. Keep one alive for the app's life.
+static CLIPBOARD: Mutex<Option<arboard::Clipboard>> = Mutex::new(None);
+
+fn with_clipboard<T>(f: impl FnOnce(&mut arboard::Clipboard) -> Option<T>) -> Option<T> {
+    let mut guard = CLIPBOARD.lock().ok()?;
+    if guard.is_none() {
+        *guard = arboard::Clipboard::new().ok();
+    }
+    f(guard.as_mut()?)
+}
+
 enum Saved {
     Text(String),
     Image(arboard::ImageData<'static>),
@@ -34,34 +68,32 @@ enum Saved {
 }
 
 pub fn copy_to_clipboard(text: &str) -> bool {
-    arboard::Clipboard::new()
-        .and_then(|mut c| c.set_text(text.to_owned()))
-        .is_ok()
+    with_clipboard(|c| c.set_text(text.to_owned()).ok()).is_some()
 }
 
-pub fn paste(text: &str, target: Option<Target>) -> PasteResult {
-    let Some(target) = target else {
-        return PasteResult::Unavailable;
-    };
+pub fn paste(text: &str, target: PasteTarget) -> PasteResult {
     if text.is_empty() {
         return PasteResult::Unavailable;
     }
-    if foreground() != Some(target) {
-        return PasteResult::DestinationChanged;
+    match target {
+        PasteTarget::CopyOnly => return PasteResult::Unavailable,
+        PasteTarget::Window(window) if foreground() != Some(window) => {
+            return PasteResult::DestinationChanged
+        }
+        _ => {}
     }
-    let Ok(mut clipboard) = arboard::Clipboard::new() else {
+    let Some(saved) = with_clipboard(|c| {
+        let saved = match c.get_text() {
+            Ok(t) => Saved::Text(t),
+            Err(_) => c
+                .get_image()
+                .map(|i| Saved::Image(i.to_owned_img()))
+                .unwrap_or(Saved::Nothing),
+        };
+        c.set_text(text.to_owned()).ok().map(|_| saved)
+    }) else {
         return PasteResult::Unavailable;
     };
-    let saved = match clipboard.get_text() {
-        Ok(t) => Saved::Text(t),
-        Err(_) => clipboard
-            .get_image()
-            .map(|i| Saved::Image(i.to_owned_img()))
-            .unwrap_or(Saved::Nothing),
-    };
-    if clipboard.set_text(text.to_owned()).is_err() {
-        return PasteResult::Unavailable;
-    }
     if !send_ctrl_v() {
         return PasteResult::Unavailable;
     }
@@ -69,17 +101,16 @@ pub fn paste(text: &str, target: Option<Target>) -> PasteResult {
     std::thread::spawn(move || {
         // Give the target time to read the clipboard before restoring it.
         std::thread::sleep(Duration::from_millis(900));
-        let Ok(mut clipboard) = arboard::Clipboard::new() else {
-            return;
-        };
-        if clipboard.get_text().ok().as_deref() != Some(ours.as_str()) {
-            return; // The user copied something else meanwhile; keep it.
-        }
-        let _ = match saved {
-            Saved::Text(t) => clipboard.set_text(t),
-            Saved::Image(i) => clipboard.set_image(i),
-            Saved::Nothing => clipboard.clear(),
-        };
+        with_clipboard(|c| {
+            if c.get_text().ok().as_deref() != Some(ours.as_str()) {
+                return None; // The user copied something else meanwhile; keep it.
+            }
+            match saved {
+                Saved::Text(t) => c.set_text(t).ok(),
+                Saved::Image(i) => c.set_image(i).ok(),
+                Saved::Nothing => c.clear().ok(),
+            }
+        });
     });
     PasteResult::Attempted
 }
@@ -126,7 +157,32 @@ fn send_ctrl_v() -> bool {
     sent as usize == inputs.len()
 }
 
-#[cfg(not(windows))]
+/// Wayland does not let ordinary apps synthesize input, so use whichever
+/// helper the user has installed: ydotool (any compositor, needs ydotoold),
+/// wtype (wlroots compositors such as Sway or Hyprland) or xdotool (X11).
+#[cfg(target_os = "linux")]
+fn send_ctrl_v() -> bool {
+    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    // Linux input event codes: 29 = KEY_LEFTCTRL, 47 = KEY_V.
+    let attempts: &[(&str, &[&str])] = &[
+        ("ydotool", &["key", "29:1", "47:1", "47:0", "29:0"]),
+        ("wtype", &["-M", "ctrl", "v", "-m", "ctrl"]),
+        ("xdotool", &["key", "--clearmodifiers", "ctrl+v"]),
+    ];
+    attempts
+        .iter()
+        .filter(|(tool, _)| wayland || *tool == "xdotool")
+        .any(|(tool, args)| {
+            std::process::Command::new(tool)
+                .args(*args)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
+        })
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn send_ctrl_v() -> bool {
     false
 }

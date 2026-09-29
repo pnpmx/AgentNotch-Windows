@@ -6,5 +6,7 @@ fn main() {
     if std::env::args().any(|a| a == agentnotch_lib::BRIDGE_FLAG) {
         std::process::exit(agentnotch_lib::run_bridge());
     }
+    #[cfg(target_os = "linux")]
+    agentnotch_lib::prepare_environment();
     agentnotch_lib::run();
 }

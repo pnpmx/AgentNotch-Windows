@@ -50,3 +50,41 @@ jobs:
             src-tauri/target/release/bundle/msi/*.msi
           if-no-files-found: error
           retention-days: 14
+
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev libasound2-dev libxdo-dev libssl-dev patchelf file
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: Lint
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Build packages
+        run: npx tauri build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agentnotch-linux-packages
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error
+          retention-days: 14
