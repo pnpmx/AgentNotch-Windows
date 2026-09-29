@@ -72,7 +72,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cd dist
+          # Artifacts keep their bundle subfolders; flatten before hashing.
+          mkdir release
+          find dist -type f -exec mv {} release/ \;
+          cd release
           sha256sum * > SHA256SUMS.txt
           gh release create "$GITHUB_REF_NAME" --draft --title "AgentNotch $GITHUB_REF_NAME" \
             --notes "Unsigned experimental build for Windows and Linux. See README for install and verification notes." \
