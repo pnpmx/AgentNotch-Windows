@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: npx tauri build
+      - name: Create draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd src-tauri/target/release/bundle
+          sha256sum nsis/*.exe msi/*.msi > SHA256SUMS.txt
+          gh release create "$GITHUB_REF_NAME" --draft --title "AgentNotch for Windows $GITHUB_REF_NAME" \
+            --notes "Unsigned experimental build. See README for SmartScreen and verification notes." \
+            --repo "$GITHUB_REPOSITORY" nsis/*.exe msi/*.msi SHA256SUMS.txt

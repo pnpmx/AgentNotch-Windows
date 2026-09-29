@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentNotch</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <div id="root" class="edge-right collapsed">
+    <div id="tab" class="tab" role="button" tabindex="-1">
+      <div class="chip" data-source="codex">
+        <svg class="ring" viewBox="0 0 36 36" aria-hidden="true">
+          <circle class="track" cx="18" cy="18" r="14"/>
+          <circle class="value" cx="18" cy="18" r="14"/>
+        </svg>
+        <span class="chip-value">--</span>
+      </div>
+      <div id="mic" class="mic" data-state="idle" aria-hidden="true"></div>
+      <div class="chip" data-source="claude">
+        <svg class="ring" viewBox="0 0 36 36" aria-hidden="true">
+          <circle class="track" cx="18" cy="18" r="14"/>
+          <circle class="value" cx="18" cy="18" r="14"/>
+        </svg>
+        <span class="chip-value">--</span>
+      </div>
+    </div>
+
+    <section id="panel" class="panel" hidden>
+      <header id="panel-header">
+        <div id="mic-large" class="mic" data-state="idle" aria-hidden="true"></div>
+        <span id="speech-label"></span>
+        <button id="settings-toggle" class="icon" type="button" data-i18n-title="settings">⚙</button>
+        <button id="close" class="icon" type="button" data-i18n-title="close">✕</button>
+      </header>
+
+      <div class="columns">
+        <div class="column" data-source="codex"><h2>Codex</h2><div class="body"></div></div>
+        <div class="column" data-source="claude"><h2>Claude Code</h2><div class="body"></div></div>
+      </div>
+
+      <div id="transcript-box" hidden>
+        <p id="transcript"></p>
+        <button id="copy" type="button" data-i18n="copy"></button>
+      </div>
+
+      <p id="notice" aria-live="polite"></p>
+
+      <div class="actions">
+        <button id="connect" type="button" data-i18n="connectClaude" hidden></button>
+        <span class="spacer"></span>
+        <button id="refresh" class="icon" type="button" data-i18n-title="refresh">↻</button>
+      </div>
+
+      <div id="settings" hidden>
+        <label data-i18n="settings.interface"></label>
+        <div class="segmented" id="ui-language"></div>
+        <label data-i18n="settings.dictation"></label>
+        <div class="segmented" id="dictation-language"></div>
+        <label data-i18n="settings.model"></label>
+        <div class="segmented" id="model"></div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

@@ -1,0 +1,10 @@
+node_modules/
+src-tauri/target/
+src-tauri/gen/
+*.log
+.DS_Store
+# Runtime data never belongs in the repo
+settings.json
+claude-usage.json
+*.bin
+*.bin.part
