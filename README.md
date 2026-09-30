@@ -33,6 +33,16 @@ real machines. Please report what you find.
 - The widget is a non-activating window, so clicking it should not take focus
   from the app you are working in (to be confirmed on real machines).
 
+## Agent features (0.3)
+
+- **Agent alerts:** see when Claude Code or Codex finishes, needs approval or
+  is waiting, per project, with an attention dot on the tab.
+- **Default model and effort** for new Claude Code and Codex sessions.
+- **Live Claude Code session:** model, effort, cost and context used.
+- **Limit alerts** at 80% and 95%, reset notices and a pace projection.
+- **Dictation options:** custom vocabulary, optional Enter after pasting,
+  filler-word removal and recent history.
+
 ## Requirements
 
 - Windows 10 (1809+) or Windows 11, x64. The WebView2 runtime is included
@@ -65,8 +75,14 @@ The NSIS installer installs for the current user only and needs no admin rights.
    in Claude Code and its limits appear.
 3. Put the cursor in any text field, hold **Ctrl + Shift + Space**, speak, release.
    The first time, the speech model downloads; try again when it finishes.
-4. ⚙ in the panel changes the interface language, dictation language and model.
-   The tray icon has *Start with Windows*, refresh and quit.
+4. **Enable agent alerts** in the panel adds Claude Code hooks to
+   `%USERPROFILE%\.claude\settings.json` (after a backup, keeping yours) and a
+   `notify` program to `%USERPROFILE%\.codex\config.toml` (never replacing one
+   you already use). New sessions then report when they finish or need you.
+5. ⚙ in the panel sets the default model and effort for new Claude Code and
+   Codex sessions, the alerts, dictation options, the interface and dictation
+   languages, and the speech model. The tray icon has *Start with Windows*,
+   refresh and quit.
 
 If pasting fails (for example into an app running as administrator), the text is
 kept on the clipboard and in the panel's **Copy** button.
