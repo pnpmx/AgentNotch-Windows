@@ -34,6 +34,58 @@ pub struct UsageSnapshot {
     pub origin: String,
 }
 
+/// Live Claude Code session details from the status line.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionInfo {
+    pub model: String,
+    pub effort: Option<String>,
+    pub cost_usd: Option<f64>,
+    pub context_percent: Option<f64>,
+    pub project: String,
+    /// Unix seconds.
+    pub updated_at: i64,
+}
+
+pub fn parse_claude_session(root: &Value, now: i64) -> Option<SessionInfo> {
+    let model = root.get("model")?;
+    let name = model
+        .get("display_name")
+        .or_else(|| model.get("id"))
+        .and_then(Value::as_str)?
+        .to_owned();
+    let project = root
+        .get("workspace")
+        .and_then(|w| w.get("project_dir").or_else(|| w.get("current_dir")))
+        .or_else(|| root.get("cwd"))
+        .and_then(Value::as_str)
+        .map(|p| {
+            p.trim_end_matches(['/', '\\'])
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or("")
+                .to_owned()
+        })
+        .unwrap_or_default();
+    Some(SessionInfo {
+        model: name,
+        effort: root
+            .get("effort")
+            .and_then(|e| e.get("level"))
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        cost_usd: number(root.get("cost").and_then(|c| c.get("total_cost_usd")))
+            .filter(|c| *c >= 0.0),
+        context_percent: number(
+            root.get("context_window")
+                .and_then(|c| c.get("used_percentage")),
+        )
+        .map(clamp_percent),
+        project,
+        updated_at: now,
+    })
+}
+
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum ParseError {
     #[error("malformed payload")]
@@ -212,6 +264,30 @@ mod tests {
         assert_eq!(snap.windows.len(), 2);
         assert_eq!(snap.windows[0].id, "claude-five_hour");
         assert_eq!(snap.windows[1].used_percent, 41.2);
+    }
+
+    #[test]
+    fn claude_session_details() {
+        let payload = json!({
+            "model": {"id": "claude-opus-5-5", "display_name": "Opus"},
+            "workspace": {"project_dir": "/home/u/my-app"},
+            "cost": {"total_cost_usd": 1.4},
+            "context_window": {"used_percentage": 62},
+            "effort": {"level": "high"}
+        });
+        let s = parse_claude_session(&payload, 10).unwrap();
+        assert_eq!(
+            (s.model.as_str(), s.effort.as_deref(), s.project.as_str()),
+            ("Opus", Some("high"), "my-app")
+        );
+        assert_eq!((s.cost_usd, s.context_percent), (Some(1.4), Some(62.0)));
+        let early = json!({"model": {"id": "claude-sonnet-5"}, "context_window": {"used_percentage": null}});
+        let s = parse_claude_session(&early, 0).unwrap();
+        assert_eq!(
+            (s.model.as_str(), s.context_percent),
+            ("claude-sonnet-5", None)
+        );
+        assert!(parse_claude_session(&json!({}), 0).is_none());
     }
 
     #[test]

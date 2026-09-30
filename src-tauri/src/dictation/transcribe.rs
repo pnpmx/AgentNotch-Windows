@@ -39,6 +39,7 @@ impl Transcriber {
         &mut self,
         model_name: &str,
         language: &str,
+        vocabulary: &str,
         samples: &[f32],
     ) -> Result<String, TranscribeError> {
         let ctx = self.context(model_name)?;
@@ -48,6 +49,12 @@ impl Transcriber {
         params.set_translate(false);
         params.set_no_context(true);
         params.set_suppress_blank(true);
+        // Whisper treats the initial prompt as preceding text, which biases it
+        // towards these spellings (project names, jargon).
+        let vocabulary = vocabulary.replace('\0', "");
+        if !vocabulary.trim().is_empty() {
+            params.set_initial_prompt(&vocabulary);
+        }
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);

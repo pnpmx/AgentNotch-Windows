@@ -1,3 +1,4 @@
+mod agents;
 mod dictation;
 mod dock;
 mod i18n;
@@ -21,12 +22,15 @@ use tauri::{
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
+use agents::events::AgentEvent;
 use dictation::inject::PasteTarget;
 use dictation::{Command, Event as SpeechEvent, SpeechState};
 use dock::Rect;
 use settings::Settings;
-use usage::parser::UsageSnapshot;
+use usage::alerts::Tracker;
+use usage::parser::{SessionInfo, UsageSnapshot};
 
+pub use agents::events::{run as run_agent_event, EVENT_FLAG};
 pub use usage::claude::{run_bridge, BRIDGE_FLAG};
 
 pub const TOGGLE_FLAG: &str = "--toggle-dictation";
@@ -45,7 +49,13 @@ struct UsageState {
     claude: Option<UsageSnapshot>,
     claude_error: Option<String>,
     claude_connected: bool,
+    /// Latest Claude Code session (model, effort, cost, context).
+    session: Option<SessionInfo>,
+    /// Window id → Unix seconds when 100% is reached at the current pace.
+    projections: std::collections::HashMap<String, i64>,
 }
+
+const HISTORY: usize = 8;
 
 struct AppState {
     settings: Mutex<Settings>,
@@ -55,7 +65,12 @@ struct AppState {
     usage: Mutex<UsageState>,
     speech: Mutex<SpeechState>,
     transcript: Mutex<String>,
+    /// Most recent dictations, newest first.
+    history: Mutex<Vec<String>>,
     dictation: Mutex<Sender<Command>>,
+    tracker: Mutex<Tracker>,
+    /// Events newer than this (Unix ms) are shown; older ones were seen.
+    events_seen: std::sync::atomic::AtomicI64,
     move_generation: AtomicU64,
     holding: AtomicBool,
     registered_hotkey: Mutex<Option<String>>,
@@ -78,6 +93,8 @@ struct Snapshot {
     usage: UsageState,
     speech: SpeechState,
     transcript: String,
+    history: Vec<String>,
+    events: Vec<AgentEvent>,
 }
 
 // ---------- Docking ----------
@@ -203,9 +220,28 @@ fn emit_usage(app: &AppHandle) {
     let _ = app.emit("usage", usage);
 }
 
+/// Feeds a fresh snapshot to the limit tracker and forwards alerts.
+fn track_limits(app: &AppHandle, snapshot: &UsageSnapshot) {
+    let state = app.state::<AppState>();
+    let (alerts, projections) = {
+        let mut tracker = state.tracker.lock().unwrap();
+        (tracker.update(snapshot), tracker.projections())
+    };
+    state.usage.lock().unwrap().projections = projections;
+    if state.settings().limit_alerts {
+        for alert in alerts {
+            let _ = app.emit("limit-alert", alert);
+        }
+    }
+}
+
 fn refresh_claude(app: &AppHandle) {
     let connected = usage::claude::is_bridge_configured();
     let snapshot = usage::claude::load();
+    let session = usage::claude::load_session();
+    if let Some(snapshot) = &snapshot {
+        track_limits(app, snapshot);
+    }
     {
         let state = app.state::<AppState>();
         let mut usage = state.usage.lock().unwrap();
@@ -219,12 +255,16 @@ fn refresh_claude(app: &AppHandle) {
             .to_owned()
         });
         usage.claude = snapshot;
+        usage.session = session;
     }
     emit_usage(app);
 }
 
 fn refresh_codex(app: &AppHandle) {
     let result = usage::codex::fetch();
+    if let Ok(snapshot) = &result {
+        track_limits(app, snapshot);
+    }
     {
         let state = app.state::<AppState>();
         let mut usage = state.usage.lock().unwrap();
@@ -251,6 +291,38 @@ fn start_usage_loop(app: &AppHandle) {
             }
             tick += 1;
             std::thread::sleep(Duration::from_secs(20));
+        }
+    });
+}
+
+// ---------- Agent activity ----------
+
+fn unseen_events(state: &AppState) -> Vec<AgentEvent> {
+    let seen = state.events_seen.load(Ordering::SeqCst);
+    agents::events::load()
+        .into_iter()
+        .filter(|e| e.at > seen)
+        .collect()
+}
+
+/// Watches the events file written by the agents' hooks.
+fn start_event_watcher(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let path = paths::agent_events();
+        let mut last_modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+        loop {
+            std::thread::sleep(Duration::from_millis(700));
+            let modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+            if modified == last_modified {
+                continue;
+            }
+            last_modified = modified;
+            let state = app.state::<AppState>();
+            if !state.settings().agent_alerts {
+                continue;
+            }
+            let _ = app.emit("agent-events", unseen_events(&state));
         }
     });
 }
@@ -290,10 +362,13 @@ fn on_hotkey(app: &AppHandle, pressed: bool) {
             model: settings.model,
         });
     } else if state.holding.swap(false, Ordering::SeqCst) {
-        state.send(Command::Stop {
+        state.send(Command::Stop(dictation::StopOptions {
             language: settings.dictation_language,
             model: settings.model,
-        });
+            vocabulary: settings.vocabulary,
+            auto_enter: settings.auto_enter,
+            remove_fillers: settings.remove_fillers,
+        }));
     }
 }
 
@@ -402,6 +477,12 @@ fn get_snapshot(state: tauri::State<AppState>) -> Snapshot {
         usage: state.usage.lock().unwrap().clone(),
         speech: state.speech.lock().unwrap().clone(),
         transcript: state.transcript.lock().unwrap().clone(),
+        history: state.history.lock().unwrap().clone(),
+        events: if state.settings().agent_alerts {
+            unseen_events(&state)
+        } else {
+            Vec::new()
+        },
     }
 }
 
@@ -444,6 +525,11 @@ struct SettingsPatch {
     resolved_language: Option<String>,
     dictation_language: Option<String>,
     model: Option<String>,
+    limit_alerts: Option<bool>,
+    agent_alerts: Option<bool>,
+    vocabulary: Option<String>,
+    auto_enter: Option<bool>,
+    remove_fillers: Option<bool>,
 }
 
 #[tauri::command]
@@ -469,6 +555,21 @@ fn update_settings(app: AppHandle, patch: SettingsPatch) -> Settings {
         {
             settings.model = v;
         }
+        if let Some(v) = patch.limit_alerts {
+            settings.limit_alerts = v;
+        }
+        if let Some(v) = patch.agent_alerts {
+            settings.agent_alerts = v;
+        }
+        if let Some(v) = patch.vocabulary {
+            settings.vocabulary = settings::sanitize_vocabulary(&v);
+        }
+        if let Some(v) = patch.auto_enter {
+            settings.auto_enter = v;
+        }
+        if let Some(v) = patch.remove_fillers {
+            settings.remove_fillers = v;
+        }
         settings.save();
         settings.clone()
     };
@@ -482,34 +583,109 @@ fn update_settings(app: AppHandle, patch: SettingsPatch) -> Settings {
     updated
 }
 
+/// Copies the latest transcript, or an entry of the history by index.
 #[tauri::command]
-fn copy_transcript(state: tauri::State<AppState>) -> bool {
-    dictation::inject::copy_to_clipboard(&state.transcript.lock().unwrap())
+fn copy_transcript(state: tauri::State<AppState>, index: Option<usize>) -> bool {
+    let text = match index {
+        Some(i) => state.history.lock().unwrap().get(i).cloned(),
+        None => Some(state.transcript.lock().unwrap().clone()),
+    };
+    text.is_some_and(|t| dictation::inject::copy_to_clipboard(&t))
+}
+
+#[tauri::command]
+fn dismiss_events(state: tauri::State<AppState>, until: i64) {
+    state.events_seen.fetch_max(until, Ordering::SeqCst);
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentsState {
+    claude: agents::config::AgentConfig,
+    codex: agents::config::AgentConfig,
+}
+
+#[tauri::command]
+fn get_agents() -> AgentsState {
+    AgentsState {
+        claude: agents::config::claude_config(),
+        codex: agents::config::codex_config(),
+    }
+}
+
+/// Default model and effort for new sessions. Empty strings restore the
+/// agent's own default.
+#[tauri::command]
+fn set_agent_defaults(
+    agent: String,
+    model: Option<String>,
+    effort: Option<String>,
+) -> Result<AgentsState, String> {
+    let result = match agent.as_str() {
+        "claude" => agents::config::set_claude_defaults(model.as_deref(), effort.as_deref()),
+        "codex" => agents::config::set_codex_defaults(model.as_deref(), effort.as_deref()),
+        _ => Err(agents::config::ConfigError::Invalid),
+    };
+    result.map_err(|e| e.to_string())?;
+    Ok(get_agents())
+}
+
+/// Installs Claude Code's hooks and Codex's notify command so the widget
+/// learns when an agent finishes or needs approval. Returns per-agent errors.
+#[tauri::command]
+fn connect_agent_alerts() -> Vec<(String, String)> {
+    let mut errors = Vec::new();
+    if let Err(e) = agents::config::install_claude_hooks() {
+        errors.push(("claude".to_owned(), e.to_string()));
+    }
+    if let Err(e) = agents::config::install_codex_notify() {
+        errors.push(("codex".to_owned(), e.to_string()));
+    }
+    errors
 }
 
 // ---------- Setup ----------
 
+/// Clicking the widget must not steal focus from the app you dictate into.
+/// `interactive` temporarily allows keyboard focus, e.g. to type settings.
 #[cfg(windows)]
-fn make_non_activating(window: &WebviewWindow) {
-    // Clicking the widget must not steal focus from the app you dictate into.
+fn set_activating(window: &WebviewWindow, interactive: bool) {
     use windows::Win32::UI::WindowsAndMessaging::{
         GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     };
     if let Ok(hwnd) = window.hwnd() {
         unsafe {
-            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            SetWindowLongPtrW(
-                hwnd,
-                GWL_EXSTYLE,
-                style | (WS_EX_NOACTIVATE.0 | WS_EX_TOOLWINDOW.0) as isize,
-            );
+            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) | WS_EX_TOOLWINDOW.0 as isize;
+            let style = if interactive {
+                style & !(WS_EX_NOACTIVATE.0 as isize)
+            } else {
+                style | WS_EX_NOACTIVATE.0 as isize
+            };
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style);
         }
+    }
+    if interactive {
+        let _ = window.set_focus();
     }
 }
 
 #[cfg(not(windows))]
+fn set_activating(window: &WebviewWindow, interactive: bool) {
+    let _ = window.set_focusable(interactive);
+    if interactive {
+        let _ = window.set_focus();
+    }
+}
+
 fn make_non_activating(window: &WebviewWindow) {
-    let _ = window.set_focusable(false);
+    set_activating(window, false);
+}
+
+#[tauri::command]
+fn set_interactive(app: AppHandle, interactive: bool) {
+    if let Some(window) = main_window(&app) {
+        set_activating(&window, interactive);
+    }
 }
 
 pub fn run() {
@@ -535,7 +711,10 @@ pub fn run() {
                 match &event {
                     SpeechEvent::State(s) => *state.speech.lock().unwrap() = s.clone(),
                     SpeechEvent::Transcript { text } => {
-                        *state.transcript.lock().unwrap() = text.clone()
+                        *state.transcript.lock().unwrap() = text.clone();
+                        let mut history = state.history.lock().unwrap();
+                        history.insert(0, text.clone());
+                        history.truncate(HISTORY);
                     }
                     SpeechEvent::Notice { .. } => {}
                 }
@@ -548,7 +727,11 @@ pub fn run() {
                 usage: Mutex::new(UsageState::default()),
                 speech: Mutex::new(SpeechState::Idle),
                 transcript: Mutex::new(String::new()),
+                history: Mutex::new(Vec::new()),
                 dictation: Mutex::new(sender),
+                tracker: Mutex::new(Tracker::default()),
+                // Activity from before this launch is not news.
+                events_seen: std::sync::atomic::AtomicI64::new(paths::now_millis()),
                 move_generation: AtomicU64::new(0),
                 holding: AtomicBool::new(false),
                 registered_hotkey: Mutex::new(None),
@@ -579,6 +762,7 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             linux::bind_portal_shortcut(&handle, on_hotkey);
             start_usage_loop(&handle);
+            start_event_watcher(&handle);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -587,7 +771,12 @@ pub fn run() {
             refresh_usage,
             connect_claude,
             update_settings,
-            copy_transcript
+            copy_transcript,
+            dismiss_events,
+            get_agents,
+            set_agent_defaults,
+            connect_agent_alerts,
+            set_interactive
         ])
         .run(tauri::generate_context!())
         .expect("error while running AgentNotch");

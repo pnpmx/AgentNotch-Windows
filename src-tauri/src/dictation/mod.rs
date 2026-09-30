@@ -2,6 +2,7 @@
 //! dedicated thread; the UI thread only sends commands and receives events.
 
 pub mod audio;
+pub mod cleanup;
 pub mod inject;
 pub mod model;
 pub mod transcribe;
@@ -20,15 +21,21 @@ use transcribe::Transcriber;
 pub const MIN_HOLD: Duration = Duration::from_millis(300);
 const MIN_AUDIO_SECONDS: f64 = 0.3;
 
+#[derive(Clone, Debug)]
+pub struct StopOptions {
+    pub language: String,
+    pub model: String,
+    pub vocabulary: String,
+    pub auto_enter: bool,
+    pub remove_fillers: bool,
+}
+
 pub enum Command {
     Start {
         target: PasteTarget,
         model: String,
     },
-    Stop {
-        language: String,
-        model: String,
-    },
+    Stop(StopOptions),
     /// Sent by the download thread when it ends.
     DownloadFinished {
         ok: bool,
@@ -122,10 +129,7 @@ impl Worker {
                         })),
                     }
                 }
-                Command::Stop {
-                    language,
-                    model: name,
-                } => {
+                Command::Stop(options) => {
                     let Some((recorder, started, target)) = self.recorder.take() else {
                         continue;
                     };
@@ -138,13 +142,26 @@ impl Worker {
                         continue;
                     }
                     emit(Event::State(SpeechState::Transcribing));
-                    match self.transcriber.transcribe(&name, &language, &samples) {
+                    let result = self.transcriber.transcribe(
+                        &options.model,
+                        &options.language,
+                        &options.vocabulary,
+                        &samples,
+                    );
+                    let result = result.map(|text| {
+                        if options.remove_fillers {
+                            cleanup::remove_fillers(&text)
+                        } else {
+                            text
+                        }
+                    });
+                    match result {
                         Ok(text) if text.is_empty() => {
                             emit(Event::State(SpeechState::Idle));
                             notice("notice.noText");
                         }
                         Ok(text) => {
-                            let result = inject::paste(&text, target);
+                            let result = inject::paste(&text, target, options.auto_enter);
                             if result != PasteResult::Attempted {
                                 inject::copy_to_clipboard(&text);
                             }

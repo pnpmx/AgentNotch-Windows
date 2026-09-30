@@ -59,3 +59,43 @@ export function ageLabel(snapshot, now, t) {
 export function hotkeyLabel(hotkey) {
   return String(hotkey || "").split("+").join(" + ");
 }
+
+const AGENT_NAMES = { claude: "Claude", codex: "Codex" };
+
+export function agentName(source) {
+  return AGENT_NAMES[source] ?? source;
+}
+
+export function eventTitle(event, t) {
+  const key = { done: "agents.done", permission: "agents.permission", needsInput: "agents.needsInput" }[event.kind];
+  return t(key ?? "agents.done", { agent: agentName(event.source) });
+}
+
+export function clockTime(unixSeconds, language) {
+  return new Intl.DateTimeFormat(language, { hour: "2-digit", minute: "2-digit" }).format(new Date(unixSeconds * 1000));
+}
+
+/// "at this pace: 100% at 16:40", only when the projection is in the future.
+export function paceLabel(eta, now, language, t) {
+  if (!Number.isFinite(eta) || eta <= now) return "";
+  return t("limit.pace", { time: clockTime(eta, language) });
+}
+
+export function sessionLine(session, t) {
+  if (!session) return "";
+  const parts = [session.model];
+  if (session.effort) parts.push(t(`effort.${session.effort}`));
+  if (Number.isFinite(session.costUsd)) parts.push(`$${session.costUsd.toFixed(2)}`);
+  if (Number.isFinite(session.contextPercent)) parts.push(t("session.context", { p: Math.round(session.contextPercent) }));
+  return parts.join(" · ");
+}
+
+/// `window` is the matching usage window when known, for an exact label.
+export function limitAlertText(alert, t, window) {
+  window ??= { id: alert.windowId, name: alert.windowId.split("-").slice(1, -1).join("-") || alert.windowId };
+  const agent = agentName(alert.windowId.split("-")[0]);
+  const label = windowLabel(window, t);
+  return alert.kind === "reset"
+    ? t("limit.reset", { agent, window: label })
+    : t("limit.threshold", { agent, window: label, percent: alert.percent });
+}

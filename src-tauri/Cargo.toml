@@ -1,6 +1,6 @@
 [package]
 name = "agentnotch"
-version = "0.2.0"
+version = "0.3.0"
 description = "Edge-docked usage widget for Codex and Claude with local push-to-talk dictation"
 authors = ["AgentNotch contributors"]
 license = "MIT"

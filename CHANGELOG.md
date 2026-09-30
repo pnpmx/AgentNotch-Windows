@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0
+
+- Agent alerts: Claude Code hooks and Codex's notify program report when an
+  agent finishes, needs approval or is waiting. The tab pulses and the panel
+  lists what happened, per project. One click installs both integrations;
+  existing hooks and notify programs are preserved.
+- Default model and effort for new Claude Code and Codex sessions, chosen from
+  the panel. Codex options come from the models Codex itself lists.
+- Live Claude Code session line: model, effort, cost and context used.
+- Limit alerts at 80% and 95%, a notice when a limit resets, and a pace
+  projection ("at this pace: 100% at 16:40").
+- Dictation: custom vocabulary for names and jargon, optional Enter after
+  pasting, filler-word removal, and a history of recent dictations.
+
 ## 0.2.0
 
 - Linux support: AppImage and .deb packages. On Wayland the widget docks via

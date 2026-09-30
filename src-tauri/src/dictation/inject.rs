@@ -71,7 +71,7 @@ pub fn copy_to_clipboard(text: &str) -> bool {
     with_clipboard(|c| c.set_text(text.to_owned()).ok()).is_some()
 }
 
-pub fn paste(text: &str, target: PasteTarget) -> PasteResult {
+pub fn paste(text: &str, target: PasteTarget, press_enter: bool) -> PasteResult {
     if text.is_empty() {
         return PasteResult::Unavailable;
     }
@@ -96,6 +96,11 @@ pub fn paste(text: &str, target: PasteTarget) -> PasteResult {
     };
     if !send_ctrl_v() {
         return PasteResult::Unavailable;
+    }
+    if press_enter {
+        // Let the paste land before submitting it.
+        std::thread::sleep(Duration::from_millis(120));
+        send_enter();
     }
     let ours = text.to_owned();
     std::thread::spawn(move || {
@@ -157,18 +162,53 @@ fn send_ctrl_v() -> bool {
     sent as usize == inputs.len()
 }
 
-/// Wayland does not let ordinary apps synthesize input, so use whichever
-/// helper the user has installed: ydotool (any compositor, needs ydotoold),
-/// wtype (wlroots compositors such as Sway or Hyprland) or xdotool (X11).
+#[cfg(windows)]
+fn send_enter() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+        VK_RETURN,
+    };
+    let key = |up: bool| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VK_RETURN,
+                wScan: 0,
+                dwFlags: if up {
+                    KEYEVENTF_KEYUP
+                } else {
+                    KEYBD_EVENT_FLAGS(0)
+                },
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    unsafe {
+        SendInput(
+            &[key(false), key(true)],
+            std::mem::size_of::<INPUT>() as i32,
+        )
+    };
+}
+
 #[cfg(target_os = "linux")]
-fn send_ctrl_v() -> bool {
+fn send_enter() {
+    // 28 = KEY_ENTER.
+    let _ = run_first(&[
+        ("ydotool", &["key", "28:1", "28:0"]),
+        ("wtype", &["-k", "Return"]),
+        ("xdotool", &["key", "Return"]),
+    ]);
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn send_enter() {}
+
+/// Runs the first helper that is installed and succeeds.
+#[cfg(target_os = "linux")]
+fn run_first(attempts: &[(&str, &[&str])]) -> bool {
     let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
-    // Linux input event codes: 29 = KEY_LEFTCTRL, 47 = KEY_V.
-    let attempts: &[(&str, &[&str])] = &[
-        ("ydotool", &["key", "29:1", "47:1", "47:0", "29:0"]),
-        ("wtype", &["-M", "ctrl", "v", "-m", "ctrl"]),
-        ("xdotool", &["key", "--clearmodifiers", "ctrl+v"]),
-    ];
     attempts
         .iter()
         .filter(|(tool, _)| wayland || *tool == "xdotool")
@@ -180,6 +220,19 @@ fn send_ctrl_v() -> bool {
                 .status()
                 .is_ok_and(|s| s.success())
         })
+}
+
+/// Wayland does not let ordinary apps synthesize input, so use whichever
+/// helper the user has installed: ydotool (any compositor, needs ydotoold),
+/// wtype (wlroots compositors such as Sway or Hyprland) or xdotool (X11).
+#[cfg(target_os = "linux")]
+fn send_ctrl_v() -> bool {
+    // Linux input event codes: 29 = KEY_LEFTCTRL, 47 = KEY_V.
+    run_first(&[
+        ("ydotool", &["key", "29:1", "47:1", "47:0", "29:0"]),
+        ("wtype", &["-M", "ctrl", "v", "-m", "ctrl"]),
+        ("xdotool", &["key", "--clearmodifiers", "ctrl+v"]),
+    ])
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]

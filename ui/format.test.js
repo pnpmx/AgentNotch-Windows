@@ -43,3 +43,28 @@ test("staleness", () => {
 test("missing placeholder stays visible", () => {
   assert.equal(en("window.weekly"), "{name} weekly");
 });
+
+test("agent event titles", () => {
+  assert.equal(f.eventTitle({ kind: "permission", source: "claude" }, en), "Claude needs your approval");
+  assert.equal(f.eventTitle({ kind: "done", source: "codex" }, f.translator(table, "es")), "Codex ha terminado");
+});
+
+test("session line", () => {
+  const session = { model: "Opus", effort: "high", costUsd: 1.4, contextPercent: 61.6 };
+  assert.equal(f.sessionLine(session, en), "Opus · High · $1.40 · context 62%");
+  assert.equal(f.sessionLine({ model: "Sonnet", effort: null, costUsd: null, contextPercent: null }, en), "Sonnet");
+  assert.equal(f.sessionLine(null, en), "");
+});
+
+test("pace label only for future projections", () => {
+  assert.equal(f.paceLabel(100, 200, "en", en), "");
+  assert.match(f.paceLabel(1_800_000_000, 1_700_000_000, "en", en), /^at this pace: 100% at \d\d:\d\d/);
+});
+
+test("limit alert text", () => {
+  assert.equal(
+    f.limitAlertText({ kind: "threshold", windowId: "claude-five_hour", percent: 80 }, en),
+    "Claude 5 hours limit at 80%",
+  );
+  assert.equal(f.limitAlertText({ kind: "reset", windowId: "claude-seven_day" }, en), "Claude 7 days limit has reset");
+});

@@ -36,8 +36,8 @@ impl Rect {
 /// has a fixed size and grows away from the edge.
 pub const TAB_THICKNESS: f64 = 50.0;
 pub const TAB_LENGTH: f64 = 176.0;
-pub const PANEL_WIDTH: f64 = 340.0;
-pub const PANEL_HEIGHT: f64 = 420.0;
+pub const PANEL_WIDTH: f64 = 360.0;
+pub const PANEL_HEIGHT: f64 = 560.0;
 
 pub fn logical_size(edge: Edge, expanded: bool) -> (f64, f64) {
     match (expanded, edge.is_vertical()) {

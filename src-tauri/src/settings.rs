@@ -17,7 +17,19 @@ pub struct Settings {
     pub edge: Edge,
     /// Position along the edge, 0...1.
     pub offset: f64,
+    /// Warn at 80% / 95% of a usage limit and when it resets.
+    pub limit_alerts: bool,
+    /// Show agent activity (finished, needs approval) in the widget.
+    pub agent_alerts: bool,
+    /// Names and terms the speech model should expect, comma separated.
+    pub vocabulary: String,
+    /// Press Enter after pasting, sending the prompt.
+    pub auto_enter: bool,
+    /// Drop filler words such as "um" or "eh" from transcripts.
+    pub remove_fillers: bool,
 }
+
+pub const VOCABULARY_MAX: usize = 600;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -28,6 +40,11 @@ impl Default for Settings {
             hotkey: "Ctrl+Shift+Space".into(),
             edge: Edge::Right,
             offset: 0.3,
+            limit_alerts: true,
+            agent_alerts: true,
+            vocabulary: String::new(),
+            auto_enter: false,
+            remove_fillers: true,
         }
     }
 }
@@ -74,8 +91,20 @@ impl Settings {
             self.offset = defaults.offset;
         }
         self.offset = self.offset.clamp(0.0, 1.0);
+        self.vocabulary = sanitize_vocabulary(&self.vocabulary);
         self
     }
+}
+
+/// Keeps the vocabulary printable and short; it becomes the speech model's
+/// initial prompt.
+pub fn sanitize_vocabulary(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| !c.is_control() || *c == ' ')
+        .take(VOCABULARY_MAX)
+        .collect::<String>()
+        .trim()
+        .to_owned()
 }
 
 #[cfg(test)]
@@ -91,6 +120,15 @@ mod tests {
         assert_eq!(s.model, "base");
         assert_eq!(s.offset, 1.0);
         assert_eq!(s.edge, Edge::Top);
+    }
+
+    #[test]
+    fn vocabulary_is_cleaned_and_capped() {
+        assert_eq!(
+            sanitize_vocabulary("  Lemon,\u{0}Flowww\n "),
+            "Lemon,Flowww"
+        );
+        assert_eq!(sanitize_vocabulary(&"a".repeat(2000)).len(), VOCABULARY_MAX);
     }
 
     #[test]

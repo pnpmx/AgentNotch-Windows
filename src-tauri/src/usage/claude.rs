@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
-use super::parser::{parse_claude_status_line, ParseError, UsageSnapshot};
+use super::parser::{
+    parse_claude_session, parse_claude_status_line, ParseError, SessionInfo, UsageSnapshot,
+};
 use crate::paths;
 
 pub const BRIDGE_FLAG: &str = "--claude-bridge";
@@ -48,10 +50,18 @@ pub fn run_bridge() -> i32 {
         return 1;
     }
     let mut out = std::io::stdout();
-    let parsed = serde_json::from_slice::<Value>(&input)
-        .map_err(|_| ParseError::Malformed)
-        .and_then(|v| parse_claude_status_line(&v, paths::now()));
-    match parsed {
+    let now = paths::now();
+    let Ok(root) = serde_json::from_slice::<Value>(&input) else {
+        let _ = writeln!(std::io::stderr(), "AgentNotch bridge: malformed payload");
+        return 1;
+    };
+    // Session details arrive even before the first rate-limit reading.
+    if let Some(session) = parse_claude_session(&root, now) {
+        if let Ok(data) = serde_json::to_vec(&session) {
+            let _ = paths::write_atomic(&paths::claude_session(), &data);
+        }
+    }
+    match parse_claude_status_line(&root, now) {
         Ok(snapshot) => {
             if let Err(error) = write_snapshot(&snapshot) {
                 let _ = writeln!(std::io::stderr(), "AgentNotch bridge: {error}");
@@ -77,6 +87,11 @@ pub fn run_bridge() -> i32 {
     }
 }
 
+pub fn load_session() -> Option<SessionInfo> {
+    let data = std::fs::read(paths::claude_session()).ok()?;
+    serde_json::from_slice(&data).ok()
+}
+
 fn short_label(id: &str) -> &'static str {
     match id {
         "claude-five_hour" => "5h",
@@ -86,13 +101,7 @@ fn short_label(id: &str) -> &'static str {
 }
 
 fn write_snapshot(snapshot: &UsageSnapshot) -> std::io::Result<()> {
-    let path = paths::claude_snapshot();
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec(snapshot)?)?;
-    std::fs::rename(tmp, path)
+    paths::write_atomic(&paths::claude_snapshot(), &serde_json::to_vec(snapshot)?)
 }
 
 /// Claude Code runs status-line commands through a shell (Git Bash on

@@ -10,6 +10,7 @@
 <body>
   <div id="root" class="edge-right collapsed">
     <div id="tab" class="tab" role="button" tabindex="-1">
+      <span id="attention" class="attention" hidden></span>
       <div class="chip" data-source="codex">
         <svg class="ring" viewBox="0 0 36 36" aria-hidden="true">
           <circle class="track" cx="18" cy="18" r="14"/>
@@ -35,9 +36,15 @@
         <button id="close" class="icon" type="button" data-i18n-title="close">✕</button>
       </header>
 
+      <div id="alerts" class="alerts" aria-live="polite"></div>
+
       <div class="columns">
         <div class="column" data-source="codex"><h2>Codex</h2><div class="body"></div></div>
-        <div class="column" data-source="claude"><h2>Claude Code</h2><div class="body"></div></div>
+        <div class="column" data-source="claude">
+          <h2>Claude Code</h2>
+          <p id="session" class="session"></p>
+          <div class="body"></div>
+        </div>
       </div>
 
       <div id="transcript-box" hidden>
@@ -45,16 +52,41 @@
         <button id="copy" type="button" data-i18n="copy"></button>
       </div>
 
+      <details id="history-box" hidden>
+        <summary data-i18n="history.title"></summary>
+        <ol id="history"></ol>
+      </details>
+
       <p id="notice" aria-live="polite"></p>
 
       <div class="actions">
         <button id="connect" type="button" data-i18n="connectClaude" hidden></button>
+        <button id="connect-agents" type="button" data-i18n="agents.connect" hidden></button>
         <span class="spacer"></span>
         <button id="refresh" class="icon" type="button" data-i18n-title="refresh">↻</button>
       </div>
 
       <div id="settings" hidden>
-        <label data-i18n="settings.interface"></label>
+        <h3 data-i18n="settings.agentDefaults"></h3>
+        <label>Claude Code</label>
+        <div class="segmented" id="claude-model"></div>
+        <div class="segmented effort" id="claude-effort"></div>
+        <label>Codex</label>
+        <div class="segmented" id="codex-model"></div>
+        <div class="segmented effort" id="codex-effort"></div>
+        <p class="hint" data-i18n="settings.newSessionsHint"></p>
+
+        <h3 data-i18n="settings.alerts"></h3>
+        <label class="check"><input type="checkbox" id="limit-alerts" /> <span data-i18n="settings.limitAlerts"></span></label>
+        <label class="check"><input type="checkbox" id="agent-alerts" /> <span data-i18n="settings.agentAlerts"></span></label>
+
+        <h3 data-i18n="settings.dictationOptions"></h3>
+        <label for="vocabulary" data-i18n="settings.vocabulary"></label>
+        <input id="vocabulary" type="text" maxlength="600" spellcheck="false" autocomplete="off" />
+        <label class="check"><input type="checkbox" id="auto-enter" /> <span data-i18n="settings.autoEnter"></span></label>
+        <label class="check"><input type="checkbox" id="remove-fillers" /> <span data-i18n="settings.removeFillers"></span></label>
+
+        <h3 data-i18n="settings.interface"></h3>
         <div class="segmented" id="ui-language"></div>
         <label data-i18n="settings.dictation"></label>
         <div class="segmented" id="dictation-language"></div>
