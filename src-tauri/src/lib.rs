@@ -444,6 +444,69 @@ fn register_hotkey(app: &AppHandle) {
     }
 }
 
+// ---------- Live agents and outside clicks ----------
+
+/// Publishes how many Claude Code and Codex agents are running, for the
+/// orbiting lights around the tab.
+fn start_presence_loop(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let mut scanner = agents::presence::Scanner::default();
+        let mut last = None;
+        loop {
+            let presence = scanner.scan();
+            if last != Some(presence) {
+                last = Some(presence);
+                let _ = app.emit("presence", presence);
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    });
+}
+
+/// Closes the expanded panel when the user clicks anywhere outside it. The
+/// widget never takes focus, so there is no blur event to rely on.
+#[cfg(windows)]
+fn start_outside_click_watcher(app: &AppHandle) {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON};
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let pressed = |vk: i32| (unsafe { GetAsyncKeyState(vk) } as u16 & 0x8000) != 0;
+        let mut was_down = false;
+        loop {
+            std::thread::sleep(Duration::from_millis(60));
+            let down = pressed(VK_LBUTTON.0 as i32) || pressed(VK_RBUTTON.0 as i32);
+            let new_press = down && !was_down;
+            was_down = down;
+            let state = app.state::<AppState>();
+            if !new_press || !state.expanded.load(Ordering::SeqCst) {
+                continue;
+            }
+            let Some(window) = main_window(&app) else {
+                continue;
+            };
+            let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) else {
+                continue;
+            };
+            let mut cursor = POINT::default();
+            if unsafe { GetCursorPos(&mut cursor) }.is_err() {
+                continue;
+            }
+            let inside = cursor.x >= pos.x
+                && cursor.x < pos.x + size.width as i32
+                && cursor.y >= pos.y
+                && cursor.y < pos.y + size.height as i32;
+            if !inside {
+                state.expanded.store(false, Ordering::SeqCst);
+                let handle = app.clone();
+                let _ = app.run_on_main_thread(move || apply_dock(&handle));
+            }
+        }
+    });
+}
+
 // ---------- Drag and drop ----------
 
 /// Paths are quoted when they contain spaces so a shell prompt reads them as
@@ -920,6 +983,9 @@ pub fn run() {
             linux::bind_portal_shortcut(&handle, on_hotkey);
             start_usage_loop(&handle);
             start_event_watcher(&handle);
+            start_presence_loop(&handle);
+            #[cfg(windows)]
+            start_outside_click_watcher(&handle);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

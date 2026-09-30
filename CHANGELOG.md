@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0
+
+- Orbiting lights: one comet circles the tab for each live agent type,
+  orange for Claude Code and mint for Codex, detected from running agent
+  processes (desktop apps and helpers excluded). It speeds up while its agent
+  works and pulses while one waits. Replaces the shimmer and breathing.
+- Windows: clicking anywhere outside the expanded panel closes it.
+
 ## 0.5.0
 
 - Compact panel: one tab at a time (**Sessions · Limits · Voice**), opening on

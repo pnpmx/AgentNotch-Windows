@@ -242,3 +242,20 @@ label.check input { accent-color: var(--codex); margin: 0; }
 .history { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .history li.latest button { background: var(--faint); border-radius: 8px; padding: 7px 8px; font-size: 11px; }
 .setup { flex-wrap: wrap; }
+
+/* ---------- Orbiting lights (replace the tab shimmer/breathe) ---------- */
+.tab[data-state="working"], .tab[data-state="waiting"] { animation: none; background: var(--bg); box-shadow: none; }
+.orbit { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.expanded .orbit { display: none; }
+.orbit rect {
+  fill: none; stroke-width: 2.2; stroke-linecap: round;
+  stroke-dasharray: 11 89; animation: orbit 7s linear infinite;
+}
+.orbit rect.claude { stroke: var(--claude); filter: drop-shadow(0 0 3px var(--claude)); }
+.orbit rect.codex { stroke: var(--codex); filter: drop-shadow(0 0 3px var(--codex)); }
+.orbit rect.working { stroke-dasharray: 17 83; animation-duration: 3.2s; }
+.orbit rect.waiting { animation: orbit 7s linear infinite, orbit-pulse 1.4s ease-in-out infinite; }
+.orbit rect.working.waiting { animation: orbit 3.2s linear infinite, orbit-pulse 1.4s ease-in-out infinite; }
+@keyframes orbit { to { stroke-dashoffset: -100; } }
+@keyframes orbit-pulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .orbit rect { animation: none; } }

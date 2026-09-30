@@ -21,6 +21,7 @@ const state = {
   events: [],
   limitAlerts: [],
   sessions: [],
+  presence: { claude: 0, codex: 0 },
   openSession: null,
   tab: "limits",
   showAllSessions: false,
@@ -266,6 +267,43 @@ function renderVoice() {
   );
 }
 
+/// One comet orbits the tab per live agent type: orange Claude, mint Codex.
+/// Faster while that agent works, pulsing while one waits.
+function renderOrbit() {
+  const svg = $("orbit");
+  const tab = $("tab");
+  const w = tab.clientWidth;
+  const h = tab.clientHeight;
+  const recent = Date.now() - 30 * 60 * 1000;
+  const comets = ["claude", "codex"]
+    .map((source) => {
+      const mine = state.sessions.filter((s) => s.source === source);
+      const working = mine.some((s) => s.state === "working" && s.updatedAt > recent);
+      const waiting = mine.some((s) => s.state === "waiting");
+      return { source, working, waiting, alive: state.presence[source] > 0 || working };
+    })
+    .filter((c) => c.alive);
+  const key = comets.map((c) => `${c.source}${c.working}${c.waiting}`).join("|") + `${w}x${h}`;
+  if (svg.dataset.key === key) return; // Keep animations running smoothly.
+  svg.dataset.key = key;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.replaceChildren(
+    ...comets.map((comet, i) => {
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("x", "1.5");
+      rect.setAttribute("y", "1.5");
+      rect.setAttribute("width", String(Math.max(0, w - 3)));
+      rect.setAttribute("height", String(Math.max(0, h - 3)));
+      rect.setAttribute("rx", "16");
+      rect.setAttribute("pathLength", "100");
+      rect.setAttribute("class", `${comet.source}${comet.working ? " working" : ""}${comet.waiting ? " waiting" : ""}`);
+      const period = comet.working ? 3.2 : 7;
+      rect.style.animationDelay = `${(-period * i) / comets.length}s`;
+      return rect;
+    }),
+  );
+}
+
 function renderAttention() {
   $("tab").dataset.state = fmt.overallState(state.sessions, Date.now());
   const attention = $("attention");
@@ -302,6 +340,7 @@ function render() {
   for (const mic of [$("mic"), $("mic-large")]) mic.dataset.state = state.speech.state;
   $("mic").title = speechLabel();
   renderAttention();
+  renderOrbit();
 
   if (!state.expanded) return;
   $("speech-label").textContent = speechLabel();
@@ -562,6 +601,7 @@ async function main() {
   await listen("agent-events", ({ payload }) => { state.events = payload; render(); });
   await listen("limit-alert", ({ payload }) => showLimitAlert(payload));
   await listen("sessions", ({ payload }) => { state.sessions = payload; render(); });
+  await listen("presence", ({ payload }) => { state.presence = payload; render(); });
   await listen("drag", ({ payload }) => { $("drop-hint").hidden = !payload; });
   await listen("agent-reminder", ({ payload }) => {
     state.notice = { text: state.t("reminder", { agent: fmt.agentName(payload.source), project: payload.project || "?" }) };
