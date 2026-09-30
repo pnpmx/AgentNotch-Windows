@@ -76,6 +76,10 @@ jobs:
           mkdir release
           find dist -type f -exec mv {} release/ \;
           cd release
+          # Version-less copies give the website stable direct-download links.
+          cp AgentNotch_*_x64-setup.exe AgentNotch-Windows-Setup.exe
+          cp AgentNotch_*_amd64.AppImage AgentNotch-Linux.AppImage
+          cp AgentNotch_*_amd64.deb AgentNotch-Linux.deb
           sha256sum * > SHA256SUMS.txt
           gh release create "$GITHUB_REF_NAME" --draft --title "AgentNotch $GITHUB_REF_NAME" \
             --notes "Unsigned experimental build for Windows and Linux. See README for install and verification notes." \
