@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0
+
+- Sessions panel: every Claude Code and Codex session at once, with project,
+  model, state and live activity ("editing auth.ts", "running npm test").
+  Uses `UserPromptSubmit` and `PreToolUse` hooks; only a short description of
+  each action is kept, never file contents. Parallel hooks write under a lock.
+- The tab shows the overall state: shimmer while working, breathing while an
+  agent waits, a flash when one finishes.
+- Drop files on the widget to paste their paths where you are typing.
+- Last response of each session with copy, and "Continue in Codex/Claude",
+  which copies a handoff prompt with the project, the request and the progress.
+- Cost per task ($, time, lines added/removed) on finished alerts.
+- Countdown when a limit is nearly used up, and a notice when it is available.
+- One reminder when a session has been waiting for you for three minutes.
+- Weekly "Wrapped" image with tasks, lines, cost, hours, favourite model,
+  top project and busiest day, saved to the Desktop to share.
+
 ## 0.3.0
 
 - Agent alerts: Claude Code hooks and Codex's notify program report when an

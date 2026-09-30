@@ -1,12 +1,12 @@
 [package]
 name = "agentnotch"
-version = "0.3.0"
+version = "0.4.0"
 description = "Edge-docked usage widget for Codex and Claude with local push-to-talk dictation"
 authors = ["AgentNotch contributors"]
 license = "MIT"
 repository = "https://github.com/pnpmx/AgentNotch-Windows"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.89"
 
 [lib]
 name = "agentnotch_lib"
@@ -28,6 +28,8 @@ cpal = "0.18"
 whisper-rs = "0.16"
 ureq = "3"
 arboard = { version = "3", features = ["wayland-data-control"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+base64 = "0.22"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd = { version = "0.13", features = ["global_shortcuts"] }

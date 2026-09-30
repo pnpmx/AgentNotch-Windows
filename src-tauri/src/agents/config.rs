@@ -92,26 +92,35 @@ fn claude_hook_command(exe: &Path) -> String {
     quoted_command(exe, &[EVENT_FLAG, "claude"])
 }
 
-fn claude_hooks_present(settings: &Map<String, Value>) -> bool {
-    ["Stop", "Notification"].iter().all(|event| {
-        settings
-            .get("hooks")
-            .and_then(|h| h.get(*event))
-            .and_then(Value::as_array)
-            .is_some_and(|groups| {
-                groups.iter().any(|g| {
-                    g.get("hooks")
-                        .and_then(Value::as_array)
-                        .is_some_and(|hooks| {
-                            hooks.iter().any(|h| {
-                                h.get("command")
-                                    .and_then(Value::as_str)
-                                    .is_some_and(|c| c.contains(EVENT_FLAG))
-                            })
+/// Events AgentNotch listens to: prompts and tool calls for live activity,
+/// notifications and stops for alerts.
+pub const CLAUDE_HOOK_EVENTS: [&str; 4] =
+    ["UserPromptSubmit", "PreToolUse", "Notification", "Stop"];
+
+fn claude_hook_present(settings: &Map<String, Value>, event: &str) -> bool {
+    settings
+        .get("hooks")
+        .and_then(|h| h.get(event))
+        .and_then(Value::as_array)
+        .is_some_and(|groups| {
+            groups.iter().any(|g| {
+                g.get("hooks")
+                    .and_then(Value::as_array)
+                    .is_some_and(|hooks| {
+                        hooks.iter().any(|h| {
+                            h.get("command")
+                                .and_then(Value::as_str)
+                                .is_some_and(|c| c.contains(EVENT_FLAG))
                         })
-                })
+                    })
             })
-    })
+        })
+}
+
+fn claude_hooks_present(settings: &Map<String, Value>) -> bool {
+    CLAUDE_HOOK_EVENTS
+        .iter()
+        .all(|event| claude_hook_present(settings, event))
 }
 
 pub fn claude_config() -> AgentConfig {
@@ -193,9 +202,14 @@ fn install_claude_hooks_in(path: &Path, exe: &Path) -> Result<(), ConfigError> {
         std::fs::copy(path, backup)?;
     }
     let hook = json!({ "type": "command", "command": claude_hook_command(exe), "async": true, "timeout": 10 });
+    let missing: Vec<&str> = CLAUDE_HOOK_EVENTS
+        .iter()
+        .copied()
+        .filter(|event| !claude_hook_present(&settings, event))
+        .collect();
     let hooks = settings.entry("hooks").or_insert_with(|| json!({}));
     let hooks = hooks.as_object_mut().ok_or(ConfigError::Malformed)?;
-    for event in ["Stop", "Notification"] {
+    for event in missing {
         let groups = hooks.entry(event).or_insert_with(|| json!([]));
         let groups = groups.as_array_mut().ok_or(ConfigError::Malformed)?;
         groups.push(json!({ "matcher": "*", "hooks": [hook.clone()] }));
@@ -424,6 +438,11 @@ mod tests {
         assert_eq!(stop.len(), 2, "user's hook kept, ours added once");
         assert_eq!(stop[0]["hooks"][0]["command"], "say done");
         assert_eq!(raw["hooks"]["Notification"].as_array().unwrap().len(), 1);
+        assert_eq!(raw["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            raw["hooks"]["UserPromptSubmit"].as_array().unwrap().len(),
+            1
+        );
         assert!(claude_config_in(&path).hooks_installed);
     }
 

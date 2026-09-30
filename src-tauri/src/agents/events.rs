@@ -5,6 +5,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::sessions::{self, TaskSummary};
+use super::stats;
 use crate::paths;
 
 pub const EVENT_FLAG: &str = "--agent-event";
@@ -34,6 +36,11 @@ pub struct AgentEvent {
     pub project: String,
     /// Unix milliseconds; also used as an id.
     pub at: i64,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// Cost, duration and lines for a finished task, when known.
+    #[serde(default)]
+    pub task: Option<TaskSummary>,
 }
 
 fn project_name(cwd: Option<&str>) -> String {
@@ -85,6 +92,8 @@ pub fn from_claude_hook(payload: &Value, at: i64) -> Option<AgentEvent> {
         message: short(message),
         project: project_name(text("cwd")),
         at,
+        session_id: text("session_id").map(str::to_owned),
+        task: None,
     })
 }
 
@@ -103,6 +112,8 @@ pub fn from_codex_notify(raw: &str, at: i64) -> Option<AgentEvent> {
         message: short(text("last-assistant-message").unwrap_or("")),
         project: project_name(text("cwd")),
         at,
+        session_id: text("thread-id").map(|t| format!("codex-{t}")),
+        task: None,
     })
 }
 
@@ -130,20 +141,59 @@ pub fn run(args: &[String]) -> i32 {
         .and_then(|i| args.get(i + 1))
         .map(String::as_str);
     let at = paths::now_millis();
-    let event = match source {
+    let (event, finished) = match source {
         Some("claude") => {
             use std::io::Read;
             let mut input = Vec::new();
             let _ = std::io::stdin().read_to_end(&mut input);
-            serde_json::from_slice::<Value>(&input)
-                .ok()
-                .and_then(|v| from_claude_hook(&v, at))
+            let Ok(payload) = serde_json::from_slice::<Value>(&input) else {
+                return 0;
+            };
+            let finished = sessions::update(|all| {
+                sessions::prune(all, at);
+                let task = sessions::apply_claude_hook(all, &payload, at);
+                let session = payload
+                    .get("session_id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| all.get(id))
+                    .cloned();
+                task.zip(session)
+            })
+            .ok()
+            .flatten();
+            (from_claude_hook(&payload, at), finished)
         }
         // Codex appends the JSON payload as the final argument.
-        Some("codex") => args.last().and_then(|raw| from_codex_notify(raw, at)),
-        _ => None,
+        Some("codex") => {
+            let raw = args.last().map(String::as_str).unwrap_or("");
+            let payload: Value = serde_json::from_str(raw).unwrap_or(Value::Null);
+            let finished = sessions::update(|all| {
+                sessions::prune(all, at);
+                let task = sessions::apply_codex_notify(all, &payload, at);
+                let id = payload
+                    .get("thread-id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("codex");
+                task.zip(all.get(&format!("codex-{id}")).cloned())
+            })
+            .ok()
+            .flatten();
+            (from_codex_notify(raw, at), finished)
+        }
+        _ => (None, None),
     };
-    if let Some(event) = event {
+    if let Some((task, session)) = &finished {
+        let _ = stats::record_now(
+            &session.source,
+            session.model.as_deref(),
+            &session.project,
+            task,
+        );
+    }
+    if let Some(mut event) = event {
+        if event.kind == EventKind::Done {
+            event.task = finished.map(|(task, _)| task);
+        }
         let _ = append(event);
     }
     0

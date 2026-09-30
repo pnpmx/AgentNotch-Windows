@@ -289,13 +289,35 @@ fn start_usage_loop(app: &AppHandle) {
             if tick.is_multiple_of(6) {
                 refresh_codex(&app);
             }
+            announce_available_limits(&app);
             tick += 1;
             std::thread::sleep(Duration::from_secs(20));
         }
     });
 }
 
+/// "You have Claude again": exhausted windows whose reset time has passed.
+fn announce_available_limits(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let alerts = state.tracker.lock().unwrap().due_available(paths::now());
+    if state.settings().limit_alerts {
+        for alert in alerts {
+            let _ = app.emit("limit-alert", alert);
+        }
+    }
+}
+
 // ---------- Agent activity ----------
+
+/// A session waiting for the user this long gets one gentle reminder.
+const WAITING_REMINDER_MS: i64 = 3 * 60 * 1000;
+
+fn emit_sessions(app: &AppHandle) {
+    let mut sessions: Vec<agents::sessions::Session> =
+        agents::sessions::load().into_values().collect();
+    sessions.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
+    let _ = app.emit("sessions", sessions);
+}
 
 fn unseen_events(state: &AppState) -> Vec<AgentEvent> {
     let seen = state.events_seen.load(Ordering::SeqCst);
@@ -309,20 +331,42 @@ fn unseen_events(state: &AppState) -> Vec<AgentEvent> {
 fn start_event_watcher(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
-        let path = paths::agent_events();
-        let mut last_modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+        let modified = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+        let events_path = paths::agent_events();
+        let sessions_path = paths::agent_sessions();
+        let mut last_events = modified(&events_path);
+        let mut last_sessions = modified(&sessions_path);
+        let mut reminded: std::collections::HashSet<(String, i64)> = Default::default();
         loop {
-            std::thread::sleep(Duration::from_millis(700));
-            let modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
-            if modified == last_modified {
-                continue;
-            }
-            last_modified = modified;
+            std::thread::sleep(Duration::from_millis(500));
             let state = app.state::<AppState>();
-            if !state.settings().agent_alerts {
-                continue;
+            let alerts_on = state.settings().agent_alerts;
+            let events_now = modified(&events_path);
+            if events_now != last_events {
+                last_events = events_now;
+                if alerts_on {
+                    let _ = app.emit("agent-events", unseen_events(&state));
+                }
             }
-            let _ = app.emit("agent-events", unseen_events(&state));
+            let sessions_now = modified(&sessions_path);
+            if sessions_now != last_sessions {
+                last_sessions = sessions_now;
+                emit_sessions(&app);
+            }
+            // One reminder per waiting period, never repeated.
+            if alerts_on {
+                let now = paths::now_millis();
+                for session in agents::sessions::load().into_values() {
+                    let waiting = session.state == agents::sessions::SessionState::Waiting;
+                    let key = (session.id.clone(), session.updated_at);
+                    if waiting
+                        && now - session.updated_at >= WAITING_REMINDER_MS
+                        && reminded.insert(key)
+                    {
+                        let _ = app.emit("agent-reminder", session);
+                    }
+                }
+            }
         }
     });
 }
@@ -397,6 +441,62 @@ fn register_hotkey(app: &AppHandle) {
                 serde_json::json!({ "key": "notice.hotkeyFailed" }),
             );
         }
+    }
+}
+
+// ---------- Drag and drop ----------
+
+/// Paths are quoted when they contain spaces so a shell prompt reads them as
+/// one argument each.
+pub fn paths_as_text(paths: &[std::path::PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|p| {
+            let text = p.to_string_lossy();
+            if text.contains(' ') {
+                format!("\"{text}\"")
+            } else {
+                text.into_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Files dropped on the widget are pasted, as paths, into the app you were
+/// typing in (the widget never takes focus, so that app is still in front).
+fn on_drag_drop(app: &AppHandle, event: &tauri::DragDropEvent) {
+    match event {
+        tauri::DragDropEvent::Enter { .. } | tauri::DragDropEvent::Over { .. } => {
+            let _ = app.emit("drag", true);
+        }
+        tauri::DragDropEvent::Leave => {
+            let _ = app.emit("drag", false);
+        }
+        tauri::DragDropEvent::Drop { paths, .. } => {
+            let _ = app.emit("drag", false);
+            if paths.is_empty() {
+                return;
+            }
+            let text = paths_as_text(paths);
+            let mut target = dictation::inject::capture_target();
+            if widget_has_focus(app, target) {
+                target = PasteTarget::CopyOnly;
+            }
+            let app = app.clone();
+            std::thread::spawn(move || {
+                let result = dictation::inject::paste(&text, target, false);
+                if result != dictation::inject::PasteResult::Attempted {
+                    dictation::inject::copy_to_clipboard(&text);
+                }
+                let key = match result {
+                    dictation::inject::PasteResult::Attempted => "notice.dropped",
+                    _ => "notice.droppedCopied",
+                };
+                let _ = app.emit("notice", serde_json::json!({ "key": key }));
+            });
+        }
+        _ => {}
     }
 }
 
@@ -630,6 +730,63 @@ fn set_agent_defaults(
     Ok(get_agents())
 }
 
+#[tauri::command]
+fn get_sessions() -> Vec<agents::sessions::Session> {
+    let mut sessions: Vec<_> = agents::sessions::load().into_values().collect();
+    sessions.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
+    sessions
+}
+
+#[tauri::command]
+fn get_week_summary() -> agents::stats::WeekSummary {
+    agents::stats::week_summary(&agents::stats::load(), agents::stats::today())
+}
+
+/// Saves the Wrapped image (PNG, base64) to the Desktop, or Pictures, and
+/// returns its path.
+#[tauri::command]
+fn save_wrapped(png_base64: String) -> Result<String, String> {
+    use base64::Engine;
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(png_base64.trim_start_matches("data:image/png;base64,"))
+        .map_err(|_| "wrapped.saveFailed".to_owned())?;
+    if !data.starts_with(b"\x89PNG") || data.len() > 20 * 1024 * 1024 {
+        return Err("wrapped.saveFailed".into());
+    }
+    let dir = dirs::desktop_dir()
+        .or_else(dirs::picture_dir)
+        .unwrap_or_else(paths::home);
+    let path = dir.join(format!(
+        "AgentNotch-Wrapped-{}.png",
+        agents::stats::today().format("%Y-%m-%d")
+    ));
+    std::fs::write(&path, data).map_err(|_| "wrapped.saveFailed".to_owned())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Shows a saved file in the system file manager.
+#[tauri::command]
+fn reveal_path(path: String) {
+    let path = std::path::PathBuf::from(path);
+    if !path.starts_with(paths::home()) || !path.exists() {
+        return;
+    }
+    #[cfg(windows)]
+    let _ = std::process::Command::new("explorer")
+        .arg("/select,")
+        .arg(&path)
+        .spawn();
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open")
+        .arg("-R")
+        .arg(&path)
+        .spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    if let Some(dir) = path.parent() {
+        let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
+    }
+}
+
 /// Installs Claude Code's hooks and Codex's notify command so the widget
 /// learns when an agent finishes or needs approval. Returns per-agent errors.
 #[tauri::command]
@@ -750,10 +907,10 @@ pub fn run() {
             if let Some(window) = main_window(&handle) {
                 make_non_activating(&window);
                 let app_for_events = handle.clone();
-                window.on_window_event(move |event| {
-                    if let WindowEvent::Moved(_) = event {
-                        schedule_snap(&app_for_events);
-                    }
+                window.on_window_event(move |event| match event {
+                    WindowEvent::Moved(_) => schedule_snap(&app_for_events),
+                    WindowEvent::DragDrop(drop) => on_drag_drop(&app_for_events, drop),
+                    _ => {}
                 });
                 apply_dock(&handle);
                 let _ = window.show();
@@ -776,7 +933,11 @@ pub fn run() {
             get_agents,
             set_agent_defaults,
             connect_agent_alerts,
-            set_interactive
+            set_interactive,
+            get_sessions,
+            get_week_summary,
+            save_wrapped,
+            reveal_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running AgentNotch");

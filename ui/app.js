@@ -20,6 +20,9 @@ const state = {
   history: [],
   events: [],
   limitAlerts: [],
+  sessions: [],
+  openSession: null,
+  dragging: false,
   agents: null,
   notice: null,
   language: "en",
@@ -98,6 +101,9 @@ function renderColumn(source, snapshot, error) {
     limit.append(row, bar, el("div", "reset", fmt.resetDescription(window.resetsAt, now(), t)));
     const pace = fmt.paceLabel(state.usage.projections?.[window.id], now(), state.language, t);
     if (pace) limit.append(el("div", "pace", pace));
+    if (window.usedPercent >= 90 && window.resetsAt > now()) {
+      limit.append(el("div", "back-in", t("limit.backIn", { time: fmt.countdown(window.resetsAt, now()) })));
+    }
     body.append(limit);
   }
   if (error) body.append(el("p", "error warn", t(error)));
@@ -141,6 +147,8 @@ function renderAlerts() {
     const title = el("strong", null, fmt.eventTitle(event, t));
     if (event.project) title.append(el("span", "project", ` · ${event.project}`));
     text.append(title);
+    const summary = fmt.taskSummary(event.task, t);
+    if (summary) text.append(el("p", "task", summary));
     if (event.message) text.append(el("p", null, event.message));
     const dismiss = el("button", "icon", "✕");
     dismiss.type = "button";
@@ -153,7 +161,71 @@ function renderAlerts() {
   list.hidden = cards.length === 0;
 }
 
+function sessionRow(session) {
+  const { t } = state;
+  const row = el("div", `session-row ${session.source} ${session.state}`);
+  const head = el("button", "session-head");
+  head.type = "button";
+  head.append(el("span", "dot"));
+  const title = el("span", "session-title", session.project || fmt.agentName(session.source));
+  const meta = el("span", "session-meta", [fmt.agentName(session.source), session.model].filter(Boolean).join(" · "));
+  head.append(title, meta);
+  head.addEventListener("click", () => {
+    state.openSession = state.openSession === session.id ? null : session.id;
+    render();
+  });
+  row.append(head);
+
+  let line = t(`state.${session.state}`);
+  if (session.state === "working" && session.activity) line = fmt.activityText(session.activity, t);
+  if (session.state === "working" && session.startedAt) {
+    line += ` · ${fmt.duration((Date.now() - session.startedAt) / 1000, t)}`;
+  }
+  if (session.state === "done") {
+    const summary = fmt.taskSummary(session.lastTask, t);
+    if (summary) line += ` · ${summary}`;
+  }
+  row.append(el("p", "session-line", line));
+
+  if (state.openSession === session.id && (session.lastMessage || session.lastPrompt)) {
+    const details = el("div", "session-details");
+    if (session.lastMessage) {
+      details.append(el("h4", null, t("response.show")), el("p", "response", session.lastMessage));
+    }
+    const buttons = el("div", "session-buttons");
+    if (session.lastMessage) {
+      const copy = el("button", null, t("response.copy"));
+      copy.type = "button";
+      copy.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(session.lastMessage);
+        state.notice = "notice.copied";
+        render();
+      });
+      buttons.append(copy);
+    }
+    const other = session.source === "codex" ? "claude" : "codex";
+    const handoff = el("button", null, t(other === "codex" ? "handoff.toCodex" : "handoff.toClaude"));
+    handoff.type = "button";
+    handoff.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(fmt.handoffPrompt(session, t));
+      state.notice = { text: t("handoff.copied", { agent: fmt.agentName(other) }) };
+      render();
+    });
+    buttons.append(handoff);
+    details.append(buttons);
+    row.append(details);
+  }
+  return row;
+}
+
+function renderSessions() {
+  const recent = state.sessions.filter((s) => s.state !== "idle" || Date.now() - s.updatedAt < 60 * 60 * 1000);
+  $("sessions-box").hidden = recent.length === 0;
+  $("sessions").replaceChildren(...recent.slice(0, 6).map(sessionRow));
+}
+
 function renderAttention() {
+  $("tab").dataset.state = fmt.overallState(state.sessions, Date.now());
   const attention = $("attention");
   const latest = state.events.at(-1);
   const kind = latest ? latest.source : state.limitAlerts.length ? "limit" : null;
@@ -191,6 +263,7 @@ function render() {
   if (!state.expanded) return;
   $("speech-label").textContent = speechLabel();
   renderAlerts();
+  renderSessions();
   renderColumn("codex", usage.codex, usage.codexError);
   renderColumn("claude", usage.claude, usage.claudeError);
   $("session").textContent = fmt.sessionLine(usage.session, t);
@@ -213,7 +286,9 @@ function render() {
       return item;
     }),
   );
-  $("notice").textContent = state.notice ? t(state.notice) : "";
+  // A notice is either an i18n key or { text } for already formatted text.
+  const notice = state.notice;
+  $("notice").textContent = !notice ? "" : typeof notice === "object" ? notice.text : t(notice);
 
   $("limit-alerts").checked = settings.limitAlerts;
   $("agent-alerts").checked = settings.agentAlerts;
@@ -277,6 +352,101 @@ function showLimitAlert(alert) {
   }, LIMIT_ALERT_MS);
 }
 
+// ---------- Wrapped ----------
+
+const WEEKDAY = (day, language) =>
+  new Intl.DateTimeFormat(language, { weekday: "long" }).format(new Date(Date.UTC(2024, 0, day))); // 2024-01-01 is a Monday
+
+/// Draws the weekly summary as a 1080×1350 image for sharing.
+function drawWrapped(week) {
+  const { t, language } = state;
+  const canvas = document.createElement("canvas");
+  canvas.width = 1080;
+  canvas.height = 1350;
+  const c = canvas.getContext("2d");
+  const gradient = c.createLinearGradient(0, 0, 1080, 1350);
+  gradient.addColorStop(0, "#11151d");
+  gradient.addColorStop(0.6, "#1b2432");
+  gradient.addColorStop(1, "#3a2518");
+  c.fillStyle = gradient;
+  c.fillRect(0, 0, 1080, 1350);
+  // Notch mark
+  c.fillStyle = "#000";
+  c.beginPath();
+  c.roundRect(390, 0, 300, 70, [0, 0, 30, 30]);
+  c.fill();
+  c.lineWidth = 7;
+  c.strokeStyle = "#3ee6b5";
+  c.beginPath(); c.arc(450, 35, 14, 0, Math.PI * 2); c.stroke();
+  c.strokeStyle = "#ff8a3d";
+  c.beginPath(); c.arc(630, 35, 14, 0, Math.PI * 2); c.stroke();
+
+  const font = (weight, size) => `${weight} ${size}px "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif`;
+  c.fillStyle = "#f4f5f7";
+  c.font = font(700, 64);
+  c.fillText(t("wrapped.title"), 90, 200);
+  c.fillStyle = "#9aa0ab";
+  c.font = font(400, 32);
+  c.fillText(`${week.from} → ${week.to}`, 90, 252);
+
+  const tasks = week.claudeTasks + week.codexTasks;
+  const stats = [
+    [String(tasks), t("wrapped.tasks"), "#f4f5f7"],
+    [`+${week.linesAdded.toLocaleString(language)}`, t("wrapped.lines"), "#3ee6b5"],
+    [`$${week.costUsd.toFixed(2)}`, t("wrapped.spent"), "#ff8a3d"],
+    [String(week.busyHours), t("wrapped.hours"), "#f4f5f7"],
+  ];
+  stats.forEach(([value, label, color], i) => {
+    const x = 90 + (i % 2) * 470;
+    const y = 400 + Math.floor(i / 2) * 230;
+    c.fillStyle = color;
+    c.font = font(700, 110);
+    c.fillText(value, x, y);
+    c.fillStyle = "#9aa0ab";
+    c.font = font(400, 34);
+    c.fillText(label, x, y + 55);
+  });
+
+  // Tasks per day
+  const max = Math.max(1, ...week.dailyTasks);
+  week.dailyTasks.forEach((n, i) => {
+    const h = Math.round((n / max) * 190);
+    c.fillStyle = n === max && n > 0 ? "#3ee6b5" : "#ffffff33";
+    c.beginPath();
+    c.roundRect(90 + i * 132, 1020 - h, 96, Math.max(h, 6), 14);
+    c.fill();
+  });
+
+  const facts = [
+    week.topModel && [t("wrapped.topModel"), week.topModel],
+    week.topProject && [t("wrapped.topProject"), week.topProject],
+    week.busiestWeekday && [t("wrapped.busiest"), WEEKDAY(week.busiestWeekday, language)],
+  ].filter(Boolean);
+  facts.forEach(([label, value], i) => {
+    c.fillStyle = "#9aa0ab";
+    c.font = font(400, 30);
+    c.fillText(label, 90, 1110 + i * 52);
+    c.fillStyle = "#f4f5f7";
+    c.font = font(600, 30);
+    c.fillText(value, 420, 1110 + i * 52);
+  });
+  c.fillStyle = "#6b7280";
+  c.font = font(400, 26);
+  c.fillText(`${t("wrapped.footer")} · agentnotch.vercel.app`, 90, 1300);
+  return canvas.toDataURL("image/png");
+}
+
+async function openWrapped() {
+  const week = await invoke("get_week_summary");
+  const empty = week.claudeTasks + week.codexTasks === 0;
+  $("wrapped").hidden = false;
+  $("wrapped-show").hidden = true;
+  $("wrapped-status").textContent = empty ? state.t("wrapped.empty") : "";
+  $("wrapped-save").hidden = empty;
+  $("wrapped-image").hidden = empty;
+  if (!empty) $("wrapped-image").src = drawWrapped(week);
+}
+
 /// Click toggles the panel; dragging more than a few pixels moves the widget,
 /// and the backend snaps it to the nearest screen edge when released.
 function makeDraggable(element, onClick) {
@@ -315,6 +485,7 @@ async function main() {
     history: snapshot.history,
     events: snapshot.events,
   });
+  state.sessions = await invoke("get_sessions");
   // Tell the backend which language "system" resolved to, for the tray menu.
   await updateSettings({ uiLanguage: state.settings.uiLanguage });
 
@@ -342,12 +513,31 @@ async function main() {
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") setExpanded(false);
   });
+  $("wrapped-open").addEventListener("click", openWrapped);
+  $("wrapped-close").addEventListener("click", () => { $("wrapped").hidden = true; });
+  let savedPath = null;
+  $("wrapped-save").addEventListener("click", async () => {
+    try {
+      savedPath = await invoke("save_wrapped", { pngBase64: $("wrapped-image").src });
+      $("wrapped-status").textContent = state.t("wrapped.saved");
+      $("wrapped-show").hidden = false;
+    } catch (key) {
+      $("wrapped-status").textContent = state.t(String(key));
+    }
+  });
+  $("wrapped-show").addEventListener("click", () => savedPath && invoke("reveal_path", { path: savedPath }));
 
   await listen("usage", ({ payload }) => { state.usage = payload; render(); });
   await listen("dock", ({ payload }) => { state.edge = payload.edge; state.expanded = payload.expanded; render(); });
   await listen("notice", ({ payload }) => { state.notice = payload.key; render(); });
   await listen("agent-events", ({ payload }) => { state.events = payload; render(); });
   await listen("limit-alert", ({ payload }) => showLimitAlert(payload));
+  await listen("sessions", ({ payload }) => { state.sessions = payload; render(); });
+  await listen("drag", ({ payload }) => { $("drop-hint").hidden = !payload; });
+  await listen("agent-reminder", ({ payload }) => {
+    state.notice = { text: state.t("reminder", { agent: fmt.agentName(payload.source), project: payload.project || "?" }) };
+    render();
+  });
   await listen("speech", ({ payload }) => {
     if (payload.kind === "state") state.speech = payload;
     if (payload.kind === "transcript") {
@@ -357,7 +547,7 @@ async function main() {
     if (payload.kind === "notice") state.notice = payload.key;
     render();
   });
-  setInterval(render, 30_000); // Keep ages, countdowns and paces current.
+  setInterval(render, 5_000); // Keep elapsed times, countdowns and paces current.
   render();
 }
 

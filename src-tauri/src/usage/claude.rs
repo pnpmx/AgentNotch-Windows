@@ -55,6 +55,10 @@ pub fn run_bridge() -> i32 {
         let _ = writeln!(std::io::stderr(), "AgentNotch bridge: malformed payload");
         return 1;
     };
+    // Per-session model, cost and line counts for the activity panel.
+    let _ = crate::agents::sessions::update(|all| {
+        crate::agents::sessions::apply_status_line(all, &root, now * 1000)
+    });
     // Session details arrive even before the first rate-limit reading.
     if let Some(session) = parse_claude_session(&root, now) {
         if let Ok(data) = serde_json::to_vec(&session) {

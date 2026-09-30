@@ -95,7 +95,58 @@ export function limitAlertText(alert, t, window) {
   window ??= { id: alert.windowId, name: alert.windowId.split("-").slice(1, -1).join("-") || alert.windowId };
   const agent = agentName(alert.windowId.split("-")[0]);
   const label = windowLabel(window, t);
-  return alert.kind === "reset"
-    ? t("limit.reset", { agent, window: label })
-    : t("limit.threshold", { agent, window: label, percent: alert.percent });
+  if (alert.kind === "reset") return t("limit.reset", { agent, window: label });
+  if (alert.kind === "available") return t("limit.available", { agent, window: label });
+  return t("limit.threshold", { agent, window: label, percent: alert.percent });
+}
+
+// ---------- Sessions ----------
+
+export function activityText(activity, t) {
+  if (!activity) return "";
+  return t(`activity.${activity.kind}`, { detail: activity.detail });
+}
+
+export function duration(seconds, t) {
+  if (!Number.isFinite(seconds) || seconds < 60) return t("task.seconds", { s: Math.max(0, Math.round(seconds || 0)) });
+  return t("task.minutes", { m: Math.round(seconds / 60) });
+}
+
+/// "$0.42 · 4 min · +156/−23", leaving out what is unknown.
+export function taskSummary(task, t) {
+  if (!task) return "";
+  const parts = [];
+  if (Number.isFinite(task.costUsd) && task.costUsd > 0) parts.push(`$${task.costUsd.toFixed(2)}`);
+  if (task.durationSecs > 0) parts.push(duration(task.durationSecs, t));
+  if (Number.isFinite(task.linesAdded) || Number.isFinite(task.linesRemoved)) {
+    parts.push(`+${task.linesAdded ?? 0}/−${task.linesRemoved ?? 0}`);
+  }
+  return parts.join(" · ");
+}
+
+/// Prompt that lets the other agent pick up where this session stopped.
+export function handoffPrompt(session, t) {
+  return t("handoff.template", {
+    project: session.project || "?",
+    cwd: session.cwd || "",
+    prompt: session.lastPrompt || "—",
+    message: session.lastMessage || "—",
+  });
+}
+
+/// "47 min" or "2 h 5 min" until a Unix-seconds time.
+export function countdown(target, now) {
+  const minutes = Math.max(1, Math.ceil((target - now) / 60));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+}
+
+/// Overall state for the tab: waiting beats working beats a just-finished flash.
+export function overallState(sessions, nowMs, flashMs = 8000) {
+  if (sessions.some((s) => s.state === "waiting")) return "waiting";
+  if (sessions.some((s) => s.state === "working" && nowMs - s.updatedAt < 30 * 60 * 1000)) return "working";
+  if (sessions.some((s) => s.state === "done" && nowMs - s.updatedAt < flashMs)) return "done";
+  return "idle";
 }

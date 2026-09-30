@@ -1,6 +1,6 @@
 # Contributing
 
-Requires Rust 1.88+ and Node.js 20+. Windows builds also need the MSVC build
+Requires Rust 1.89+ and Node.js 20+. Windows builds also need the MSVC build
 tools and CMake (see the Tauri prerequisites).
 
 ```sh

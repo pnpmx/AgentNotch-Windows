@@ -16,8 +16,17 @@ const MIN_SPAN_SECONDS: i64 = 5 * 60;
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum LimitAlert {
-    Threshold { window_id: String, percent: u8 },
-    Reset { window_id: String },
+    Threshold {
+        window_id: String,
+        percent: u8,
+    },
+    Reset {
+        window_id: String,
+    },
+    /// A window that had run out (95%+) is available again at its reset time.
+    Available {
+        window_id: String,
+    },
 }
 
 #[derive(Default)]
@@ -25,6 +34,7 @@ struct Track {
     samples: Vec<(i64, f64)>,
     resets_at: Option<i64>,
     notified: u8,
+    exhausted: bool,
 }
 
 #[derive(Default)]
@@ -52,6 +62,9 @@ impl Tracker {
                 *track = Track::default();
             }
             track.resets_at = window.resets_at;
+            if window.used_percent >= 95.0 {
+                track.exhausted = true;
+            }
             if track.samples.last().map(|(t, _)| *t) != Some(now) {
                 track.samples.push((now, window.used_percent));
             }
@@ -71,6 +84,21 @@ impl Tracker {
             }
         }
         alerts
+    }
+
+    /// Windows that were exhausted and whose reset time has now passed. Each
+    /// fires once; the next reading starts a fresh period.
+    pub fn due_available(&mut self, now: i64) -> Vec<LimitAlert> {
+        self.tracks
+            .iter_mut()
+            .filter(|(_, t)| t.exhausted && t.resets_at.is_some_and(|r| r <= now))
+            .map(|(id, t)| {
+                t.exhausted = false;
+                LimitAlert::Available {
+                    window_id: id.clone(),
+                }
+            })
+            .collect()
     }
 
     /// Unix seconds when the window would reach 100% at the recent pace,
@@ -184,6 +212,20 @@ mod tests {
             }]
         );
         assert_eq!(t.update(&snap(120, 82.0, 28_000)).len(), 1);
+    }
+
+    #[test]
+    fn exhausted_window_announces_availability_once() {
+        let mut t = Tracker::default();
+        t.update(&snap(0, 97.0, 5_000));
+        assert!(t.due_available(4_999).is_empty());
+        assert_eq!(
+            t.due_available(5_000),
+            vec![LimitAlert::Available {
+                window_id: "claude-five_hour".into()
+            }]
+        );
+        assert!(t.due_available(6_000).is_empty());
     }
 
     #[test]

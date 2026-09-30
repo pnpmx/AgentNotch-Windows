@@ -68,3 +68,24 @@ test("limit alert text", () => {
   );
   assert.equal(f.limitAlertText({ kind: "reset", windowId: "claude-seven_day" }, en), "Claude 7 days limit has reset");
 });
+
+test("session helpers", () => {
+  assert.equal(f.activityText({ kind: "edit", detail: "auth.ts" }, en), "editing auth.ts");
+  assert.equal(f.activityText({ kind: "run", detail: "npm test" }, f.translator(table, "es")), "ejecutando npm test");
+  assert.equal(f.taskSummary({ costUsd: 0.42, durationSecs: 240, linesAdded: 156, linesRemoved: 23 }, en), "$0.42 · 4 min · +156/−23");
+  assert.equal(f.taskSummary({ costUsd: null, durationSecs: 0, linesAdded: null, linesRemoved: null }, en), "");
+  assert.equal(f.countdown(1000 + 47 * 60, 1000), "47 min");
+  assert.equal(f.countdown(1000 + 125 * 60, 1000), "2 h 5 min");
+  const prompt = f.handoffPrompt({ project: "api", cwd: "/w/api", lastPrompt: "fix login", lastMessage: "Half done." }, en);
+  assert.match(prompt, /“api” \(\/w\/api\)/);
+  assert.match(prompt, /fix login[\s\S]*Half done\./);
+});
+
+test("overall state priority", () => {
+  const now = 100_000;
+  assert.equal(f.overallState([{ state: "working", updatedAt: now }, { state: "waiting", updatedAt: now }], now), "waiting");
+  assert.equal(f.overallState([{ state: "working", updatedAt: now }], now), "working");
+  assert.equal(f.overallState([{ state: "done", updatedAt: now - 1000 }], now), "done");
+  assert.equal(f.overallState([{ state: "done", updatedAt: now - 60_000 }], now), "idle");
+  assert.equal(f.overallState([], now), "idle");
+});

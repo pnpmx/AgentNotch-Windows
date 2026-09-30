@@ -118,7 +118,7 @@ On X11 everything works as on Windows (`xdotool` is used for pasting).
 
 ## Build from source
 
-Requires Rust 1.88+, Node.js 20+, CMake, and the platform libraries from the
+Requires Rust 1.89+, Node.js 20+, CMake, and the platform libraries from the
 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) (MSVC build tools
 and WebView2 on Windows; WebKitGTK 4.1, libayatana-appindicator and ALSA headers
 on Linux).

@@ -24,6 +24,14 @@ pub fn claude_session() -> PathBuf {
     data_dir().join("claude-session.json")
 }
 
+pub fn agent_sessions() -> PathBuf {
+    data_dir().join("agent-sessions.json")
+}
+
+pub fn stats() -> PathBuf {
+    data_dir().join("stats.json")
+}
+
 pub fn agent_events() -> PathBuf {
     data_dir().join("agent-events.json")
 }
