@@ -43,6 +43,18 @@ real machines. Please report what you find.
 - **Dictation options:** custom vocabulary, optional Enter after pasting,
   filler-word removal and recent history.
 
+## Sessions, live activity and Wrapped (0.4)
+
+- **Sessions panel** with every Claude Code and Codex session, its project,
+  model, state and live activity; last response, copy, and **Continue in
+  Codex/Claude** handoff prompts.
+- The tab shimmers while agents work, breathes while one waits, flashes when
+  one finishes.
+- **Drop files on the widget** to paste their paths where you are typing.
+- Cost, time and lines per finished task; countdown near a limit and a notice
+  when it is available again; one reminder for sessions waiting 3 minutes.
+- **Your week**: a shareable summary image saved to the Desktop.
+
 ## Requirements
 
 - Windows 10 (1809+) or Windows 11, x64. The WebView2 runtime is included
