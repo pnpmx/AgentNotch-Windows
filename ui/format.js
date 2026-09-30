@@ -118,7 +118,7 @@ export function taskSummary(task, t) {
   const parts = [];
   if (Number.isFinite(task.costUsd) && task.costUsd > 0) parts.push(`$${task.costUsd.toFixed(2)}`);
   if (task.durationSecs > 0) parts.push(duration(task.durationSecs, t));
-  if (Number.isFinite(task.linesAdded) || Number.isFinite(task.linesRemoved)) {
+  if ((task.linesAdded ?? 0) > 0 || (task.linesRemoved ?? 0) > 0) {
     parts.push(`+${task.linesAdded ?? 0}/−${task.linesRemoved ?? 0}`);
   }
   return parts.join(" · ");
@@ -149,4 +149,40 @@ export function overallState(sessions, nowMs, flashMs = 8000) {
   if (sessions.some((s) => s.state === "working" && nowMs - s.updatedAt < 30 * 60 * 1000)) return "working";
   if (sessions.some((s) => s.state === "done" && nowMs - s.updatedAt < flashMs)) return "done";
   return "idle";
+}
+
+/// Agent output as short plain text: the text inside JSON replies, without
+/// Markdown tables, emphasis or code marks.
+export function plainText(raw) {
+  let text = String(raw ?? "").trim();
+  if (text.startsWith("{")) {
+    try {
+      const object = JSON.parse(text);
+      const inner = ["summary", "message", "text", "content", "result"].map((k) => object[k]).find((v) => typeof v === "string");
+      if (inner) text = inner;
+    } catch {
+      /* Not JSON after all. */
+    }
+  }
+  const lines = [];
+  for (const rawLine of text.split(/\r?\n/)) {
+    let line = rawLine.trim();
+    if (line && /^[|:\- ]+$/.test(line) && line.includes("-")) continue; // table separator
+    if (line.startsWith("|") || line.endsWith("|")) {
+      line = line.replace(/^[|\s]+|[|\s]+$/g, "").split("|").map((c) => c.trim()).join(" · ");
+    }
+    line = line.replace(/^#+\s*/, "").replace(/^>\s/, "").replace(/^[-*]\s/, "• ");
+    line = line.replace(/\*\*|__|`/g, "");
+    lines.push(line.trim());
+  }
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/// Unread and waiting sessions first, then working, then most recent;
+/// sessions finished over an hour ago are left out.
+export function orderSessions(sessions, unreadIds, nowMs) {
+  const rank = (s) => (s.state === "waiting" ? 0 : unreadIds.has(s.id) ? 1 : s.state === "working" ? 2 : 3);
+  return sessions
+    .filter((s) => s.state === "working" || s.state === "waiting" || unreadIds.has(s.id) || nowMs - s.updatedAt < 3_600_000)
+    .sort((a, b) => rank(a) - rank(b) || b.updatedAt - a.updatedAt);
 }

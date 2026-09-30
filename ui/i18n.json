@@ -143,7 +143,13 @@
     "wrapped.show": "Show in folder",
     "wrapped.saveFailed": "Couldn’t save the image.",
     "wrapped.empty": "No finished tasks yet this week. Enable agent alerts to start counting.",
-    "wrapped.footer": "Made with AgentNotch · open source"
+    "wrapped.footer": "Made with AgentNotch · open source",
+    "tabs.limits": "Limits",
+    "tabs.voice": "Voice",
+    "sessions.empty": "No active sessions. They appear here when Claude Code or Codex are working.",
+    "sessions.showAll": "Show all ({n})",
+    "sessions.showLess": "Show less",
+    "voice.empty": "Hold the shortcut to dictate into any app. Your recent dictations appear here."
   },
   "es": {
     "speech.idle": "Mantén {hotkey} para dictar",
@@ -289,7 +295,13 @@
     "wrapped.show": "Mostrar en carpeta",
     "wrapped.saveFailed": "No se pudo guardar la imagen.",
     "wrapped.empty": "Aún no hay tareas terminadas esta semana. Activa los avisos de agentes para empezar a contar.",
-    "wrapped.footer": "Hecho con AgentNotch · código abierto"
+    "wrapped.footer": "Hecho con AgentNotch · código abierto",
+    "tabs.limits": "Límites",
+    "tabs.voice": "Voz",
+    "sessions.empty": "No hay sesiones activas. Aparecen aquí cuando Claude Code o Codex están trabajando.",
+    "sessions.showAll": "Ver todas ({n})",
+    "sessions.showLess": "Ver menos",
+    "voice.empty": "Mantén el atajo para dictar en cualquier app. Tus dictados recientes aparecen aquí."
   },
   "it": {
     "speech.idle": "Tieni premuto {hotkey} per dettare",
@@ -435,7 +447,13 @@
     "wrapped.show": "Mostra nella cartella",
     "wrapped.saveFailed": "Impossibile salvare l’immagine.",
     "wrapped.empty": "Nessuna attività completata questa settimana. Attiva gli avvisi degli agenti per iniziare a contare.",
-    "wrapped.footer": "Creato con AgentNotch · open source"
+    "wrapped.footer": "Creato con AgentNotch · open source",
+    "tabs.limits": "Limiti",
+    "tabs.voice": "Voce",
+    "sessions.empty": "Nessuna sessione attiva. Appaiono qui quando Claude Code o Codex lavorano.",
+    "sessions.showAll": "Mostra tutte ({n})",
+    "sessions.showLess": "Mostra meno",
+    "voice.empty": "Tieni premuta la scorciatoia per dettare in qualsiasi app. Le dettature recenti appaiono qui."
   },
   "fr": {
     "speech.idle": "Maintenez {hotkey} pour dicter",
@@ -581,7 +599,13 @@
     "wrapped.show": "Afficher dans le dossier",
     "wrapped.saveFailed": "Impossible d’enregistrer l’image.",
     "wrapped.empty": "Aucune tâche terminée cette semaine. Activez les alertes d’agents pour commencer.",
-    "wrapped.footer": "Créé avec AgentNotch · open source"
+    "wrapped.footer": "Créé avec AgentNotch · open source",
+    "tabs.limits": "Limites",
+    "tabs.voice": "Voix",
+    "sessions.empty": "Aucune session active. Elles apparaissent ici quand Claude Code ou Codex travaillent.",
+    "sessions.showAll": "Tout voir ({n})",
+    "sessions.showLess": "Voir moins",
+    "voice.empty": "Maintenez le raccourci pour dicter dans n’importe quelle app. Vos dictées récentes s’affichent ici."
   },
   "de": {
     "speech.idle": "{hotkey} gedrückt halten zum Diktieren",
@@ -727,7 +751,13 @@
     "wrapped.show": "Im Ordner zeigen",
     "wrapped.saveFailed": "Bild konnte nicht gespeichert werden.",
     "wrapped.empty": "Diese Woche noch keine erledigten Aufgaben. Aktiviere Agenten-Hinweise zum Zählen.",
-    "wrapped.footer": "Erstellt mit AgentNotch · Open Source"
+    "wrapped.footer": "Erstellt mit AgentNotch · Open Source",
+    "tabs.limits": "Limits",
+    "tabs.voice": "Sprache",
+    "sessions.empty": "Keine aktiven Sitzungen. Sie erscheinen hier, wenn Claude Code oder Codex arbeiten.",
+    "sessions.showAll": "Alle anzeigen ({n})",
+    "sessions.showLess": "Weniger anzeigen",
+    "voice.empty": "Halte das Kürzel, um in jeder App zu diktieren. Deine letzten Diktate erscheinen hier."
   },
   "pt": {
     "speech.idle": "Segure {hotkey} para ditar",
@@ -873,6 +903,12 @@
     "wrapped.show": "Mostrar na pasta",
     "wrapped.saveFailed": "Não foi possível salvar a imagem.",
     "wrapped.empty": "Nenhuma tarefa concluída nesta semana. Ative os avisos dos agentes para começar a contar.",
-    "wrapped.footer": "Feito com AgentNotch · código aberto"
+    "wrapped.footer": "Feito com AgentNotch · código aberto",
+    "tabs.limits": "Limites",
+    "tabs.voice": "Voz",
+    "sessions.empty": "Nenhuma sessão ativa. Elas aparecem aqui quando o Claude Code ou o Codex estão trabalhando.",
+    "sessions.showAll": "Ver todas ({n})",
+    "sessions.showLess": "Ver menos",
+    "voice.empty": "Segure o atalho para ditar em qualquer app. Seus ditados recentes aparecem aqui."
   }
 }

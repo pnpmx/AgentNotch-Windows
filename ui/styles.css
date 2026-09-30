@@ -211,3 +211,34 @@ label.check input { accent-color: var(--codex); margin: 0; }
 .wrapped img { width: 100%; height: auto; min-height: 0; flex: 1; object-fit: contain; border-radius: 10px; }
 .wrapped p { margin: 0; font-size: 11px; color: var(--muted); }
 .wrapped-actions { display: flex; gap: 8px; align-items: center; }
+
+/* ---------- Compact panel: tabs ---------- */
+.tabs { display: flex; gap: 2px; padding: 2px; background: var(--faint); border-radius: 9px; }
+.tabs button {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
+  background: transparent; font-size: 11px; font-weight: 600; color: var(--muted); padding: 5px 4px; border-radius: 7px;
+}
+.tabs button[aria-selected="true"] { background: rgba(244, 245, 247, 0.16); color: var(--text); }
+.badge { background: var(--claude); color: #000; font-size: 9px; font-weight: 700; border-radius: 8px; padding: 0 5px; }
+.tab-body { display: grid; gap: 8px; margin-top: 8px; }
+.empty { margin: 0; font-size: 11px; color: var(--muted); }
+
+.session-row { padding: 5px 8px; }
+.session-row.open { background: rgba(244, 245, 247, 0.12); }
+.session-head { gap: 6px; }
+.session-head .session-line {
+  flex: 1; min-width: 0; margin: 0; font-size: 10px; color: var(--muted);
+  font-family: "Cascadia Mono", Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.session-row.waiting .session-head .session-line { color: var(--warn); }
+.session-row.unread .session-title { font-weight: 800; }
+.unread-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--claude); flex: none; }
+.chevron { color: var(--muted); font-size: 9px; flex: none; }
+.session-details { margin: 6px 0 2px 13px; }
+.session-meta { margin: 0 0 4px; font-size: 10px; color: var(--muted); }
+.session-details .response { max-height: 6.5em; }
+.more { font-size: 10px; color: var(--muted); justify-self: start; }
+
+.history { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.history li.latest button { background: var(--faint); border-radius: 8px; padding: 7px 8px; font-size: 11px; }
+.setup { flex-wrap: wrap; }

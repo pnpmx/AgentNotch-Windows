@@ -22,6 +22,10 @@ const state = {
   limitAlerts: [],
   sessions: [],
   openSession: null,
+  tab: "limits",
+  showAllSessions: false,
+  /// Agent events already seen in the panel (by timestamp).
+  readEvents: new Set(),
   dragging: false,
   agents: null,
   notice: null,
@@ -134,64 +138,68 @@ function renderSegmented(container, options, current, onPick) {
 
 function renderAlerts() {
   const { t } = state;
-  const list = $("alerts");
-  const cards = [];
-  for (const alert of state.limitAlerts) {
+  const cards = state.limitAlerts.map((alert) => {
     const card = el("div", `alert limit ${alert.kind}`);
     card.append(el("strong", null, fmt.limitAlertText(alert, t, findWindow(alert.windowId))));
-    cards.push(card);
-  }
-  for (const event of state.events.slice(-3).reverse()) {
-    const card = el("div", `alert agent ${event.source} ${event.kind}`);
-    const text = el("div", "alert-text");
-    const title = el("strong", null, fmt.eventTitle(event, t));
-    if (event.project) title.append(el("span", "project", ` · ${event.project}`));
-    text.append(title);
-    const summary = fmt.taskSummary(event.task, t);
-    if (summary) text.append(el("p", "task", summary));
-    if (event.message) text.append(el("p", null, event.message));
-    const dismiss = el("button", "icon", "✕");
-    dismiss.type = "button";
-    dismiss.title = t("agents.dismiss");
-    dismiss.addEventListener("click", () => dismissEvents(event.at));
-    card.append(text, dismiss);
-    cards.push(card);
-  }
-  list.replaceChildren(...cards);
-  list.hidden = cards.length === 0;
+    return card;
+  });
+  $("alerts").replaceChildren(...cards);
+  $("alerts").hidden = cards.length === 0;
 }
 
-function sessionRow(session) {
-  const { t } = state;
-  const row = el("div", `session-row ${session.source} ${session.state}`);
-  const head = el("button", "session-head");
-  head.type = "button";
-  head.append(el("span", "dot"));
-  const title = el("span", "session-title", session.project || fmt.agentName(session.source));
-  const meta = el("span", "session-meta", [fmt.agentName(session.source), session.model].filter(Boolean).join(" · "));
-  head.append(title, meta);
-  head.addEventListener("click", () => {
-    state.openSession = state.openSession === session.id ? null : session.id;
-    render();
-  });
-  row.append(head);
+function unreadEvents() {
+  return state.events.filter((e) => e.sessionId && !state.readEvents.has(e.at));
+}
 
+function unreadSessionIds() {
+  return new Set(unreadEvents().map((e) => e.sessionId).filter(Boolean));
+}
+
+/// Opening a session marks its alerts as read; once nothing is unread the
+/// backend forgets them too.
+function markRead(session) {
+  for (const e of state.events) if (e.sessionId === session.id) state.readEvents.add(e.at);
+  if (unreadEvents().length === 0 && state.events.length) {
+    invoke("dismiss_events", { until: Math.max(...state.events.map((e) => e.at)) });
+  }
+}
+
+function sessionLine(session) {
+  const { t } = state;
   let line = t(`state.${session.state}`);
   if (session.state === "working" && session.activity) line = fmt.activityText(session.activity, t);
-  if (session.state === "working" && session.startedAt) {
-    line += ` · ${fmt.duration((Date.now() - session.startedAt) / 1000, t)}`;
-  }
+  if (session.state === "working" && session.startedAt) line += ` · ${fmt.duration((Date.now() - session.startedAt) / 1000, t)}`;
   if (session.state === "done") {
     const summary = fmt.taskSummary(session.lastTask, t);
     if (summary) line += ` · ${summary}`;
   }
-  row.append(el("p", "session-line", line));
+  return line;
+}
 
-  if (state.openSession === session.id && (session.lastMessage || session.lastPrompt)) {
+function sessionRow(session, unread) {
+  const { t } = state;
+  const open = state.openSession === session.id;
+  const row = el("div", `session-row ${session.source} ${session.state}${open ? " open" : ""}${unread ? " unread" : ""}`);
+  const head = el("button", "session-head");
+  head.type = "button";
+  head.append(
+    el("span", "dot"),
+    el("span", "session-title", session.project || fmt.agentName(session.source)),
+    el("span", "session-line", sessionLine(session)),
+  );
+  if (unread) head.append(el("span", "unread-dot"));
+  head.append(el("span", "chevron", open ? "▴" : "▾"));
+  head.addEventListener("click", () => {
+    state.openSession = open ? null : session.id;
+    markRead(session);
+    render();
+  });
+  row.append(head);
+
+  if (open) {
     const details = el("div", "session-details");
-    if (session.lastMessage) {
-      details.append(el("h4", null, t("response.show")), el("p", "response", session.lastMessage));
-    }
+    details.append(el("p", "session-meta", [fmt.agentName(session.source), session.model].filter(Boolean).join(" · ")));
+    if (session.lastMessage) details.append(el("p", "response", fmt.plainText(session.lastMessage)));
     const buttons = el("div", "session-buttons");
     if (session.lastMessage) {
       const copy = el("button", null, t("response.copy"));
@@ -219,15 +227,49 @@ function sessionRow(session) {
 }
 
 function renderSessions() {
-  const recent = state.sessions.filter((s) => s.state !== "idle" || Date.now() - s.updatedAt < 60 * 60 * 1000);
-  $("sessions-box").hidden = recent.length === 0;
-  $("sessions").replaceChildren(...recent.slice(0, 6).map(sessionRow));
+  const { t } = state;
+  const unread = unreadSessionIds();
+  const ordered = fmt.orderSessions(state.sessions, unread, Date.now());
+  const shown = state.showAllSessions ? ordered : ordered.slice(0, 4);
+  $("sessions-empty").hidden = ordered.length > 0;
+  $("sessions").replaceChildren(...shown.map((s) => sessionRow(s, unread.has(s.id))));
+  $("sessions-more").hidden = ordered.length <= 4;
+  $("sessions-more").textContent = state.showAllSessions ? t("sessions.showLess") : t("sessions.showAll", { n: ordered.length });
+}
+
+function renderTabs() {
+  for (const button of document.querySelectorAll("[data-tab]")) {
+    const selected = button.dataset.tab === state.tab;
+    button.setAttribute("aria-selected", String(selected));
+    $(`tab-${button.dataset.tab}`).hidden = !selected;
+  }
+  const count = unreadEvents().length;
+  $("unread-badge").hidden = count === 0;
+  $("unread-badge").textContent = String(count);
+}
+
+function renderVoice() {
+  const { t } = state;
+  $("voice-empty").hidden = state.history.length > 0;
+  $("history").replaceChildren(
+    ...state.history.map((text, i) => {
+      const item = el("li", i === 0 ? "latest" : null);
+      const copy = el("button", "linklike", text);
+      copy.type = "button";
+      copy.title = t("copy");
+      copy.addEventListener("click", async () => {
+        if (await invoke("copy_transcript", { index: i })) { state.notice = "notice.copied"; render(); }
+      });
+      item.append(copy);
+      return item;
+    }),
+  );
 }
 
 function renderAttention() {
   $("tab").dataset.state = fmt.overallState(state.sessions, Date.now());
   const attention = $("attention");
-  const latest = state.events.at(-1);
+  const latest = unreadEvents().at(-1);
   const kind = latest ? latest.source : state.limitAlerts.length ? "limit" : null;
   attention.hidden = !kind;
   attention.className = `attention ${kind ?? ""} ${latest?.kind === "permission" ? "urgent" : ""}`;
@@ -247,6 +289,7 @@ function renderAgentSettings() {
     renderSegmented($(`${name}-effort`), efforts, config.effort, (effort) => setAgentDefaults(name, { effort }));
   }
   $("connect-agents").hidden = agents.claude.hooksInstalled && agents.codex.hooksInstalled;
+  $("setup").hidden = $("connect").hidden && $("connect-agents").hidden;
 }
 
 function render() {
@@ -263,29 +306,15 @@ function render() {
   if (!state.expanded) return;
   $("speech-label").textContent = speechLabel();
   renderAlerts();
+  $("main-view").hidden = !$("settings").hidden;
+  renderTabs();
   renderSessions();
   renderColumn("codex", usage.codex, usage.codexError);
   renderColumn("claude", usage.claude, usage.claudeError);
   $("session").textContent = fmt.sessionLine(usage.session, t);
+  renderVoice();
   $("connect").hidden = Boolean(usage.claudeConnected);
-  $("transcript-box").hidden = !state.transcript;
-  $("transcript").textContent = state.transcript;
-
-  const history = state.history.slice(1); // The newest is shown above.
-  $("history-box").hidden = history.length === 0;
-  $("history").replaceChildren(
-    ...history.map((text, i) => {
-      const item = el("li");
-      const copy = el("button", "linklike", text);
-      copy.type = "button";
-      copy.title = t("copy");
-      copy.addEventListener("click", async () => {
-        if (await invoke("copy_transcript", { index: i + 1 })) { state.notice = "notice.copied"; render(); }
-      });
-      item.append(copy);
-      return item;
-    }),
-  );
+  $("setup").hidden = $("connect").hidden && $("connect-agents").hidden;
   // A notice is either an i18n key or { text } for already formatted text.
   const notice = state.notice;
   $("notice").textContent = !notice ? "" : typeof notice === "object" ? notice.text : t(notice);
@@ -310,6 +339,10 @@ function render() {
 
 async function setExpanded(expanded) {
   state.expanded = expanded;
+  // Open where there is something to see.
+  if (expanded) {
+    state.tab = fmt.orderSessions(state.sessions, unreadSessionIds(), Date.now()).length ? "sessions" : "limits";
+  }
   if (!expanded) setSettingsOpen(false);
   await invoke("set_expanded", { expanded });
   if (expanded) refreshAgents();
@@ -321,6 +354,7 @@ async function setExpanded(expanded) {
 function setSettingsOpen(open) {
   $("settings").hidden = !open;
   invoke("set_interactive", { interactive: open });
+  render();
 }
 
 async function refreshAgents() {
@@ -334,12 +368,6 @@ async function setAgentDefaults(agent, change) {
   } catch (key) {
     state.notice = String(key);
   }
-  render();
-}
-
-async function dismissEvents(until) {
-  await invoke("dismiss_events", { until });
-  state.events = state.events.filter((e) => e.at > until);
   render();
 }
 
@@ -494,9 +522,10 @@ async function main() {
   $("close").addEventListener("click", () => setExpanded(false));
   $("settings-toggle").addEventListener("click", () => setSettingsOpen($("settings").hidden));
   $("refresh").addEventListener("click", () => { invoke("refresh_usage"); refreshAgents(); });
-  $("copy").addEventListener("click", async () => {
-    if (await invoke("copy_transcript", { index: null })) { state.notice = "notice.copied"; render(); }
-  });
+  for (const button of document.querySelectorAll("[data-tab]")) {
+    button.addEventListener("click", () => { state.tab = button.dataset.tab; render(); });
+  }
+  $("sessions-more").addEventListener("click", () => { state.showAllSessions = !state.showAllSessions; render(); });
   $("connect").addEventListener("click", async () => {
     try { await invoke("connect_claude"); } catch (key) { state.notice = String(key); render(); }
   });

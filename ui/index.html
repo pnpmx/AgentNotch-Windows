@@ -38,39 +38,47 @@
 
       <div id="alerts" class="alerts" aria-live="polite"></div>
 
-      <div id="sessions-box" class="sessions-box" hidden>
-        <h3 data-i18n="sessions.title"></h3>
-        <div id="sessions" class="sessions"></div>
-      </div>
+      <div id="main-view">
+        <nav class="tabs" role="tablist">
+          <button type="button" role="tab" data-tab="sessions"><span data-i18n="sessions.title"></span><span id="unread-badge" class="badge" hidden></span></button>
+          <button type="button" role="tab" data-tab="limits" data-i18n="tabs.limits"></button>
+          <button type="button" role="tab" data-tab="voice" data-i18n="tabs.voice"></button>
+        </nav>
 
-      <div class="columns">
-        <div class="column" data-source="codex"><h2>Codex</h2><div class="body"></div></div>
-        <div class="column" data-source="claude">
-          <h2>Claude Code</h2>
-          <p id="session" class="session"></p>
-          <div class="body"></div>
+        <div id="tab-sessions" class="tab-body">
+          <p id="sessions-empty" class="empty" data-i18n="sessions.empty"></p>
+          <div id="sessions" class="sessions"></div>
+          <button id="sessions-more" class="linklike more" type="button" hidden></button>
+        </div>
+
+        <div id="tab-limits" class="tab-body" hidden>
+          <div class="columns">
+            <div class="column" data-source="codex"><h2>Codex</h2><div class="body"></div></div>
+            <div class="column" data-source="claude">
+              <h2>Claude Code</h2>
+              <p id="session" class="session"></p>
+              <div class="body"></div>
+            </div>
+          </div>
+          <div class="actions">
+            <button id="wrapped-open" type="button" data-i18n="wrapped.button"></button>
+            <span class="spacer"></span>
+            <button id="refresh" class="icon" type="button" data-i18n-title="refresh">↻</button>
+          </div>
+        </div>
+
+        <div id="tab-voice" class="tab-body" hidden>
+          <p id="voice-empty" class="empty" data-i18n="voice.empty"></p>
+          <ol id="history" class="history"></ol>
         </div>
       </div>
 
-      <div id="transcript-box" hidden>
-        <p id="transcript"></p>
-        <button id="copy" type="button" data-i18n="copy"></button>
-      </div>
-
-      <details id="history-box" hidden>
-        <summary data-i18n="history.title"></summary>
-        <ol id="history"></ol>
-      </details>
-
-      <p id="notice" aria-live="polite"></p>
-
-      <div class="actions">
+      <div id="setup" class="actions setup" hidden>
         <button id="connect" type="button" data-i18n="connectClaude" hidden></button>
         <button id="connect-agents" type="button" data-i18n="agents.connect" hidden></button>
-        <button id="wrapped-open" type="button" data-i18n="wrapped.button"></button>
-        <span class="spacer"></span>
-        <button id="refresh" class="icon" type="button" data-i18n-title="refresh">↻</button>
       </div>
+
+      <p id="notice" aria-live="polite"></p>
 
       <div id="settings" hidden>
         <h3 data-i18n="settings.agentDefaults"></h3>

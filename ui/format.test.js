@@ -89,3 +89,22 @@ test("overall state priority", () => {
   assert.equal(f.overallState([{ state: "done", updatedAt: now - 60_000 }], now), "idle");
   assert.equal(f.overallState([], now), "idle");
 });
+
+test("plain text from agent output", () => {
+  assert.equal(f.plainText('{"summary":"Fixed the flow.","files":[]}'), "Fixed the flow.");
+  const md = "## Result\n\n| Platform | Version |\n|---|---|\n| **Mac** | `v0.5.0` |\n\n\n\n- done";
+  assert.equal(f.plainText(md), "Result\n\nPlatform · Version\nMac · v0.5.0\n\n• done");
+  assert.equal(f.taskSummary({ costUsd: 0.47, durationSecs: 55, linesAdded: 0, linesRemoved: 0 }, en), "$0.47 · 55 s");
+});
+
+test("session ordering", () => {
+  const now = 10_000_000;
+  const sessions = [
+    { id: "old", state: "done", updatedAt: now - 7_200_000 },
+    { id: "a", state: "done", updatedAt: now - 1000 },
+    { id: "w", state: "working", updatedAt: now - 5000 },
+    { id: "u", state: "done", updatedAt: now - 9000 },
+    { id: "wait", state: "waiting", updatedAt: now - 20000 },
+  ];
+  assert.deepEqual(f.orderSessions(sessions, new Set(["u"]), now).map((s) => s.id), ["wait", "u", "w", "a"]);
+});
